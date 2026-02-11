@@ -3,7 +3,7 @@
 
 # TSA Volume Forecasting
 
-This project forecasts daily U.S. TSA passenger volume using an **XGBoost regression model** with calendar, lag, holiday, and weather features.
+This project forecasts daily U.S. TSA passenger volume using an XGBoost regression model with calendar, lag, holiday, and weather features.
 
 ---
 
@@ -11,7 +11,7 @@ This project forecasts daily U.S. TSA passenger volume using an **XGBoost regres
 
 ### `get_weather.py`
 
-* Pulls historical weather data from **Open-Meteo**
+* Pulls historical weather data from Open-Meteo
 * Aggregates data from major U.S. hub cities
 * Engineers disruption-focused weather features (e.g., severe weather flags, wind/snow metrics)
 * Outputs: weather_data.csv
@@ -31,8 +31,7 @@ This project forecasts daily U.S. TSA passenger volume using an **XGBoost regres
   * Holiday ramp features (Thanksgiving & Christmas)
   * Lag, rolling, and EWMA features
   * Weather features
-* Trains an **XGBoost model**
-* Generates test predictions
+* Trains an XGBoost model and generates predictions
 
 * Produces evaluation plots:
 
@@ -50,7 +49,7 @@ python main.py
 
 ---
 
-## Example Outputs
+## Graphs
 
 ### Actual vs Predicted
 
