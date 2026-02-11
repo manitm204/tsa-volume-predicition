@@ -1,0 +1,10 @@
+matplotlib
+numpy
+pandas
+xgboost
+holidays
+scikit-learn
+requests
+fredapi
+ipykernel
+fredapi
