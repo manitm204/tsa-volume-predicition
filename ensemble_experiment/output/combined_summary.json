@@ -1,0 +1,38 @@
+{
+  "n_rows": 364,
+  "date_start": "2025-06-05",
+  "date_end": "2026-06-03",
+  "per_model_mae": {
+    "pred_ag_tabular": 66419.6665521978,
+    "pred_ag_timeseries": 74635.24136110772,
+    "pred_prophet": 128812.26861883418,
+    "pred_anchor_master": 79962.46738350169
+  },
+  "simple_avg_mae": 72498.38348392797,
+  "residual_correlation": {
+    "ag_tabular": {
+      "ag_tabular": 1.0,
+      "ag_timeseries": 0.833,
+      "prophet": 0.501,
+      "anchor_master": 0.798
+    },
+    "ag_timeseries": {
+      "ag_tabular": 0.833,
+      "ag_timeseries": 1.0,
+      "prophet": 0.51,
+      "anchor_master": 0.679
+    },
+    "prophet": {
+      "ag_tabular": 0.501,
+      "ag_timeseries": 0.51,
+      "prophet": 1.0,
+      "anchor_master": 0.517
+    },
+    "anchor_master": {
+      "ag_tabular": 0.798,
+      "ag_timeseries": 0.679,
+      "prophet": 0.517,
+      "anchor_master": 1.0
+    }
+  }
+}

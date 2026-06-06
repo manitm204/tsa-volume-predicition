@@ -1,0 +1,75 @@
+{
+  "n_folds": 4,
+  "fold_test_size": 91,
+  "fold_time_limit_s": 300,
+  "final_time_limit_s": 600,
+  "preset": "best_quality",
+  "n_features": 34,
+  "features": [
+    "regime_gap_3d_7d",
+    "days_to_holiday_x_dow",
+    "vol_diff_1",
+    "dow_weekly_share",
+    "Volume_lag7",
+    "week_vol_cumsum",
+    "last_week_avg",
+    "lag7_x_dow_share",
+    "nearest_holiday_aligned_lag",
+    "log_Volume_lag7",
+    "month",
+    "doy_cos",
+    "dow_sin",
+    "dow_x_month",
+    "days_to_holiday",
+    "nearest_holiday_expected_vol",
+    "holiday_decay_shape",
+    "holiday_expected_x_dow",
+    "anchor_accel_adjusted",
+    "pre_holiday_regime",
+    "holiday_expected_vs_normal",
+    "same_dow_acceleration",
+    "dayofweek",
+    "prior_7d_total",
+    "holiday_asymmetry",
+    "week_accel_ratio",
+    "week_progress_vs_4w_avg",
+    "vol_same_dow_trimmed_8w",
+    "holiday_regime_strength",
+    "lag365_residual_anchor",
+    "Volume_lag3",
+    "lag365_error_7d",
+    "first_half_week_strength",
+    "vol_same_dow_median_8w"
+  ],
+  "fold_metrics": [
+    {
+      "fold": 1,
+      "start": "2025-06-05",
+      "end": "2025-09-03",
+      "n": 91,
+      "mae": 63309.1640625
+    },
+    {
+      "fold": 2,
+      "start": "2025-09-04",
+      "end": "2025-12-03",
+      "n": 91,
+      "mae": 61088.1875
+    },
+    {
+      "fold": 3,
+      "start": "2025-12-04",
+      "end": "2026-03-04",
+      "n": 91,
+      "mae": 95820.6953125
+    },
+    {
+      "fold": 4,
+      "start": "2026-03-05",
+      "end": "2026-06-03",
+      "n": 91,
+      "mae": 45460.62109375
+    }
+  ],
+  "overall_oof_mae": 66419.6665521978
+}

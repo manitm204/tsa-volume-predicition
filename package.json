@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "dev":     "cd dashboard/frontend && npm run dev",
+    "build":   "cd dashboard/frontend && npm run build",
+    "backend": "cd dashboard/backend && uvicorn main:app --reload --port 8000"
+  },
+  "dependencies": {
+    "motion": "^12.40.0"
+  }
+}

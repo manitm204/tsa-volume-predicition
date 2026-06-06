@@ -1,0 +1,62 @@
+{
+  "moderate_storm": {
+    "sigma": 89388.0,
+    "df_t_median": 5.86,
+    "core_brier_gauss": 0.216304,
+    "core_brier_t": 0.216591,
+    "core_brier_iso": 0.207088,
+    "core_logloss_gauss": 0.623165,
+    "core_logloss_t": 0.623855,
+    "core_logloss_iso": 0.60074
+  },
+  "normal": {
+    "sigma": 76439.0,
+    "df_t_median": 5.87,
+    "core_brier_gauss": 0.207451,
+    "core_brier_t": 0.208023,
+    "core_brier_iso": 0.207534,
+    "core_logloss_gauss": 0.603579,
+    "core_logloss_t": 0.605059,
+    "core_logloss_iso": 0.604041
+  },
+  "peak_holiday": {
+    "sigma": 126203.0,
+    "df_t_median": 5.85,
+    "core_brier_gauss": 0.184322,
+    "core_brier_t": 0.185913,
+    "core_brier_iso": 0.183043,
+    "core_logloss_gauss": 0.555096,
+    "core_logloss_t": 0.558914,
+    "core_logloss_iso": 0.550062
+  },
+  "severe_storm": {
+    "sigma": 335690.0,
+    "df_t_median": 7.35,
+    "core_brier_gauss": 0.263915,
+    "core_brier_t": 0.26185,
+    "core_brier_iso": 0.243463,
+    "core_logloss_gauss": 0.728288,
+    "core_logloss_t": 0.722689,
+    "core_logloss_iso": 0.679882
+  },
+  "shoulder_post": {
+    "sigma": 74302.0,
+    "df_t_median": 5.87,
+    "core_brier_gauss": 0.219241,
+    "core_brier_t": 0.21909,
+    "core_brier_iso": 0.213421,
+    "core_logloss_gauss": 0.631523,
+    "core_logloss_t": 0.630782,
+    "core_logloss_iso": 0.620593
+  },
+  "shoulder_pre": {
+    "sigma": 57855.0,
+    "df_t_median": 5.88,
+    "core_brier_gauss": 0.204528,
+    "core_brier_t": 0.205233,
+    "core_brier_iso": 0.212919,
+    "core_logloss_gauss": 0.595329,
+    "core_logloss_t": 0.597476,
+    "core_logloss_iso": 0.616683
+  }
+}

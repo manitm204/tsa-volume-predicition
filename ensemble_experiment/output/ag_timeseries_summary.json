@@ -1,0 +1,65 @@
+{
+  "n_folds": 4,
+  "fold_time_limit_s": 600,
+  "preset": "best_quality",
+  "covariate_scope": "TS3",
+  "n_covariates": 24,
+  "covariates": [
+    "dayofweek",
+    "month",
+    "doy_cos",
+    "doy_sin",
+    "week_of_year",
+    "quarter",
+    "summer_flag",
+    "holiday_season_flag",
+    "is_holiday",
+    "days_to_holiday",
+    "days_to_holiday_x_dow",
+    "holiday_decay_shape",
+    "holiday_expected_x_dow",
+    "nearest_holiday_aligned_lag",
+    "nearest_holiday_expected_vol",
+    "holiday_expected_vs_normal",
+    "holiday_regime_strength",
+    "is_long_weekend",
+    "post_holiday_flag",
+    "pre_holiday_regime",
+    "lag365_residual_anchor",
+    "lag365_same_dow_5w_mean",
+    "lag365_error_7d",
+    "yoy_ratio_7d"
+  ],
+  "missing_covariates": [],
+  "fold_metrics": [
+    {
+      "fold": 1,
+      "start": "2025-06-05",
+      "end": "2025-09-03",
+      "n": 91,
+      "mae": 60321.86517127492
+    },
+    {
+      "fold": 2,
+      "start": "2025-09-04",
+      "end": "2025-12-03",
+      "n": 91,
+      "mae": 76738.06967233379
+    },
+    {
+      "fold": 3,
+      "start": "2025-12-04",
+      "end": "2026-03-04",
+      "n": 91,
+      "mae": 113634.82227734185
+    },
+    {
+      "fold": 4,
+      "start": "2026-03-05",
+      "end": "2026-06-03",
+      "n": 91,
+      "mae": 47846.20832348036
+    }
+  ],
+  "overall_oof_mae": 74635.24136110774
+}
