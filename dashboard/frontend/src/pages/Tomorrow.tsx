@@ -233,7 +233,8 @@ export default function Tomorrow() {
           title="Forecast distribution"
           sub={`N(μ = ${fmtM(ensemble)}, σ = ${sigmaEff ? (sigmaEff / 1000).toFixed(1) + 'k' : '—'}) · 3 nearest ${isKalshi ? "Kalshi" : "fallback"} thresholds marked`}
         >
-          <ResponsiveContainer width="100%" height={300}>
+          <div className="h-[220px] sm:h-[300px]">
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={bellCurve} margin={{ top: 28, right: 20, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="bellGrad" x1="0" y1="0" x2="0" y2="1">
@@ -301,6 +302,7 @@ export default function Tomorrow() {
               />
             </AreaChart>
           </ResponsiveContainer>
+          </div>
 
           {/* σ legend */}
           <div className="flex flex-wrap gap-5 mt-2 text-[10px] text-slate-500">
@@ -439,7 +441,8 @@ function EdgeChart({
 }) {
   return (
     <GlassSection title={title} sub={sub}>
-      <ResponsiveContainer width="100%" height={260}>
+      <div className="h-[200px] sm:h-[260px]">
+      <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.08)" />
           <XAxis
@@ -467,6 +470,7 @@ function EdgeChart({
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+      </div>
     </GlassSection>
   );
 }

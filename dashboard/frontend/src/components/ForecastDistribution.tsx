@@ -41,7 +41,8 @@ export function ForecastDistribution() {
       title="Forecast Distribution"
       sub={`Normal-approx around model μ = ${mu.toFixed(3)}M · σ = ${sigma.toFixed(4)}M · 80% CI ${ci80Lo?.toFixed(3)}—${ci80Hi?.toFixed(3)}M`}
     >
-      <ResponsiveContainer width="100%" height={280}>
+      <div className="h-[200px] sm:h-[280px]">
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 10, right: 18, bottom: 4, left: 0 }}>
           <defs>
             <linearGradient id="distFill" x1="0" y1="0" x2="0" y2="1">
@@ -126,6 +127,7 @@ export function ForecastDistribution() {
           />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
 
       <div className="grid grid-cols-3 gap-3 mt-3">
         <DistStat

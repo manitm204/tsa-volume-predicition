@@ -1,11 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { formatDistanceToNow, format } from "date-fns";
-import { RefreshCw, Clock, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, Clock, Wifi, WifiOff, Menu } from "lucide-react";
 import { StatusDot } from "../ui/StatusDot";
 import { fmt, fmtPct } from "../../lib/format";
 
-export default function TopBar({ title }: { title: string }) {
+interface TopBarProps {
+  title: string;
+  onMenuClick?: () => void;
+}
+
+export default function TopBar({ title, onMenuClick }: TopBarProps) {
   const { data: ov, isError, refetch, isFetching } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,
@@ -42,7 +47,7 @@ export default function TopBar({ title }: { title: string }) {
 
   return (
     <header
-      className="fixed top-0 right-0 left-60 z-10"
+      className="fixed top-0 right-0 left-0 lg:left-60 z-20"
       style={{
         background: "rgba(5, 8, 15, 0.85)",
         backdropFilter: "blur(14px)",
@@ -51,17 +56,25 @@ export default function TopBar({ title }: { title: string }) {
       }}
     >
       {/* Row 1 — title + status pills + refresh */}
-      <div className="flex items-center justify-between px-6 h-12">
-        <div className="flex items-center gap-3">
-          <h1 className="display text-[15px] font-bold text-slate-100 tracking-tight">{title}</h1>
-          <span className="text-slate-700">/</span>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">TSA · KXTSAW</span>
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 lg:px-6 h-12">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Hamburger — mobile only */}
+          <button
+            onClick={onMenuClick}
+            className="lg:hidden p-1.5 -ml-1 rounded-lg text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors flex-shrink-0"
+            aria-label="Open menu"
+          >
+            <Menu size={18} />
+          </button>
+          <h1 className="display text-[14px] sm:text-[15px] font-bold text-slate-100 tracking-tight truncate">{title}</h1>
+          <span className="text-slate-700 hidden sm:inline">/</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500 hidden sm:inline">TSA · KXTSAW</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           {ov && (
             <span
-              className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+              className="flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-semibold px-2 sm:px-2.5 py-1 rounded-full"
               style={
                 ov.auto_trading
                   ? { background: "rgba(34,211,164,0.12)", color: "#22d3a4", border: "1px solid rgba(34,211,164,0.30)", boxShadow: "0 0 12px rgba(34,211,164,0.15)" }
@@ -74,7 +87,7 @@ export default function TopBar({ title }: { title: string }) {
           )}
 
           {lastRun && (
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span className="hidden md:flex items-center gap-1.5 text-[11px] text-slate-400">
               <Clock size={11} />
               <span className="text-slate-300">{format(lastRun, "HH:mm 'UTC'")}</span>
               <span className="text-slate-500">· {formatDistanceToNow(lastRun, { addSuffix: true })}</span>
@@ -83,7 +96,7 @@ export default function TopBar({ title }: { title: string }) {
 
           <div className="flex items-center gap-1.5">
             {isLive ? <Wifi size={12} className="text-edge-up" /> : <WifiOff size={12} className="text-edge-down" />}
-            <span className="text-[11px] font-semibold" style={{ color: isLive ? "#22d3a4" : "#ef5466" }}>
+            <span className="hidden sm:inline text-[11px] font-semibold" style={{ color: isLive ? "#22d3a4" : "#ef5466" }}>
               {isLive ? "LIVE" : "OFFLINE"}
             </span>
           </div>
@@ -98,10 +111,10 @@ export default function TopBar({ title }: { title: string }) {
         </div>
       </div>
 
-      {/* Row 2 — ticker strip */}
-      <div className="border-t border-white/[0.04] h-8 flex items-center">
+      {/* Row 2 — ticker strip (shorter on mobile) */}
+      <div className="border-t border-white/[0.04] h-7 sm:h-8 flex items-center">
         <div className="ticker w-full">
-          <div className="ticker-track text-[11px]">
+          <div className="ticker-track text-[10px] sm:text-[11px]">
             {looped.map((it, i) => (
               <span key={i} className="inline-flex items-center gap-1.5">
                 <span className="text-[10px] font-bold tracking-[0.16em] text-slate-600">{it.label}</span>

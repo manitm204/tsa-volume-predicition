@@ -53,15 +53,15 @@ export function SignalHero() {
           }}
         />
 
-        <div className="relative p-7">
+        <div className="relative p-4 sm:p-6 lg:p-7">
           {/* Eyebrow */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between gap-2 mb-4 sm:mb-5 flex-wrap">
             <div className="flex items-center gap-2">
               <Zap size={14} className="text-edge-up" />
               <span className="label !text-edge-up">THIS WEEK&apos;S SIGNAL</span>
               <StatusDot tone="live" size={6} className="ml-1" />
             </div>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[10.5px] sm:text-[11px] text-slate-500">
               {best
                 ? `Best of ${opps.filter((o) => o.signal !== "skip").length} active markets`
                 : "No edge above threshold"}
@@ -69,20 +69,20 @@ export function SignalHero() {
           </div>
 
           {/* MAIN GRID: Recommendation | Stats | Grade */}
-          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr_auto] gap-8 items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr_auto] gap-5 sm:gap-6 xl:gap-8 items-start">
             {/* Recommendation */}
-            <div>
+            <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-[0.20em] text-slate-500 font-bold mb-2">
                 Recommendation
               </div>
               <div
-                className={`display text-[44px] leading-[1.05] font-bold ${
+                className={`display text-[28px] sm:text-[36px] xl:text-[44px] leading-[1.05] font-bold break-words ${
                   best ? (recDir ? "gradient-text-emerald" : "gradient-text-red") : "text-slate-300"
                 }`}
               >
                 {recAction}
               </div>
-              <div className="flex items-center gap-2 mt-3">
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
                 {best && (
                   <>
                     <span className={`badge ${recDir ? "badge-buy" : "badge-sell"}`}>
@@ -144,16 +144,16 @@ export function SignalHero() {
             </div>
 
             {/* Grade column */}
-            <div className="flex flex-col items-center justify-between gap-4 min-w-[160px]">
+            <div className="flex flex-col items-center justify-between gap-4 xl:min-w-[160px]">
               <div className="text-center">
                 <div className="text-[11px] uppercase tracking-[0.20em] text-slate-500 font-bold mb-3">
                   Signal Strength
                 </div>
-                <GradePill grade={grade} size="lg" className="!h-20 !min-w-[88px] !text-[40px] shadow-glow-emerald" />
+                <GradePill grade={grade} size="lg" className="!h-14 sm:!h-20 !min-w-[64px] sm:!min-w-[88px] !text-[28px] sm:!text-[40px] shadow-glow-emerald" />
               </div>
-              <div className="w-full glass !p-3 !rounded-xl text-center">
+              <div className="w-full glass !p-2.5 sm:!p-3 !rounded-xl text-center">
                 <div className="label !text-[10px] mb-1">Kelly Size (½K)</div>
-                <div className="display text-2xl font-bold text-edge-up">
+                <div className="display text-xl sm:text-2xl font-bold text-edge-up">
                   {kellySize != null ? fmtMoney(kellySize, 0) : "$0"}
                 </div>
                 <div className="text-[10px] text-slate-500 mt-1">

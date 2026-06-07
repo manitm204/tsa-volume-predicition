@@ -97,7 +97,8 @@ export function ForecastStrip() {
         </div>
       }
     >
-      <ResponsiveContainer width="100%" height={260}>
+      <div className="h-[180px] sm:h-[260px]">
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 6, right: 14, bottom: 4, left: 0 }}>
           <defs>
             <linearGradient id="stripActual" x1="0" y1="0" x2="0" y2="1">
@@ -140,6 +141,7 @@ export function ForecastStrip() {
           />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
     </GlassSection>
   );
 }

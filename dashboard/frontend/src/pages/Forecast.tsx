@@ -141,7 +141,8 @@ export default function Forecast() {
         {combinedLoading ? <div className="skeleton h-[380px]" /> : (
           <div className="space-y-0">
             {/* Top: lines */}
-            <ResponsiveContainer width="100%" height={260}>
+            <div className="h-[180px] sm:h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
               <LineChart data={combinedData} syncId="model-combined" margin={{ top: 8, right: 14, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.07)" />
                 <XAxis
@@ -163,9 +164,11 @@ export default function Forecast() {
                 <Line type="monotone" dataKey="Predicted" name="Predicted" stroke="#f59e0b" strokeWidth={1.6} strokeDasharray="5 3" dot={false} connectNulls={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
+            </div>
 
             {/* Bottom: error bars sharing same x */}
-            <ResponsiveContainer width="100%" height={130}>
+            <div className="h-[100px] sm:h-[130px]">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={combinedData} syncId="model-combined" margin={{ top: 0, right: 14, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.07)" />
                 <XAxis
@@ -192,6 +195,7 @@ export default function Forecast() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            </div>
 
             <div className="flex flex-wrap items-center gap-5 mt-2 px-1 text-[10px] text-slate-500">
               <span className="flex items-center gap-1.5">

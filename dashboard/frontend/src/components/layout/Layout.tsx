@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
@@ -14,13 +15,23 @@ const titles: Record<string, string> = {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const title = titles[pathname] ?? "Dashboard";
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Close drawer on route change
+  useEffect(() => { setNavOpen(false); }, [pathname]);
+
+  // Lock body scroll when drawer is open on mobile
+  useEffect(() => {
+    document.body.style.overflow = navOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [navOpen]);
 
   return (
     <div className="min-h-screen bg-ink-950 text-slate-200">
-      <Sidebar />
-      <TopBar title={title} />
+      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <TopBar title={title} onMenuClick={() => setNavOpen(true)} />
       <main
-        className="ml-60 pt-[80px] min-h-screen relative"
+        className="lg:ml-60 pt-[76px] sm:pt-[80px] min-h-screen relative"
         style={{
           background:
             "radial-gradient(900px 320px at 12% -10%, rgba(34,211,164,0.06), transparent 60%)," +
@@ -33,7 +44,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           className="absolute inset-0 pointer-events-none opacity-[0.6] grid-bg"
           aria-hidden
         />
-        <div className="relative p-6 max-w-[1640px] mx-auto">{children}</div>
+        <div className="relative p-3 sm:p-4 lg:p-6 max-w-[1640px] mx-auto">{children}</div>
       </main>
     </div>
   );

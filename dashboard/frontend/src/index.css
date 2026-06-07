@@ -86,6 +86,9 @@
     padding: 20px;
     box-shadow: 0 4px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   }
+  @media (max-width: 640px) {
+    .card { padding: 14px; }
+  }
 
   /* Animated gradient border (signal hero) */
   .neon-border {
@@ -244,6 +247,20 @@
   .data-table tbody tr:hover { background: rgba(99,140,255,0.05); }
   .data-table tbody tr:last-child { border-bottom: none; }
 
+  /* On mobile, allow horizontal scroll for wide tables and tighten cells */
+  @media (max-width: 640px) {
+    .data-table {
+      display: block;
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .data-table th { padding: 6px 8px 8px; }
+    .data-table td { padding: 8px; }
+  }
+
   /* Sortable header */
   .th-sort {
     cursor: pointer;
@@ -290,6 +307,13 @@
     padding: 6px 0;
     transition: background .15s ease;
   }
+  @media (max-width: 640px) {
+    .ladder-row {
+      grid-template-columns: 52px 1fr 48px 36px;
+      gap: 6px;
+      font-size: 12px;
+    }
+  }
   .ladder-row:hover { background: rgba(99,140,255,0.04); border-radius: 8px; }
   .ladder-track {
     position: relative;
@@ -319,6 +343,13 @@
     border-radius: 10px;
     border: 1px solid transparent;
     transition: all .15s ease;
+  }
+  @media (max-width: 640px) {
+    .feed-item {
+      grid-template-columns: 48px 1fr;
+      gap: 10px;
+      padding: 8px 10px;
+    }
   }
   .feed-item:hover {
     background: rgba(99,140,255,0.04);
@@ -418,4 +449,40 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Mobile (<640px) overrides — tighten layout, shrink type, scale charts
+   These run after Tailwind so a single class change cascades everywhere.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  html { font-size: 14.5px; }
+
+  /* Surfaces — softer shadows + smaller corners + tighter default padding */
+  .glass,
+  .glass-strong {
+    border-radius: 12px;
+    box-shadow: 0 2px 18px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  /* Tailwind p-5 (20px) → 12px on phones */
+  .p-5  { padding: 12px !important; }
+  .p-6  { padding: 14px !important; }
+  .p-7  { padding: 14px !important; }
+  .px-6 { padding-left: 14px !important; padding-right: 14px !important; }
+  .py-6 { padding-top: 14px !important; padding-bottom: 14px !important; }
+  .gap-5 { gap: 12px !important; }
+  .gap-6 { gap: 14px !important; }
+  .gap-8 { gap: 16px !important; }
+  .space-y-5 > * + * { margin-top: 12px !important; }
+
+  /* Trim recharts text so labels fit narrow phones */
+  .recharts-cartesian-axis-tick text { font-size: 9.5px !important; }
+  .recharts-legend-item-text       { font-size: 10px !important; }
+
+  /* Grade pills should not dominate the hero */
+  .grade { min-width: 30px; height: 24px; font-size: 12px; padding: 0 6px; }
+
+  /* Make `.label` tiny but still readable */
+  .label { font-size: 0.62rem; letter-spacing: 0.12em; }
 }

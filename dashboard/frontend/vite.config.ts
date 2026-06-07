@@ -10,8 +10,13 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,            // bind 0.0.0.0 so the VM's public IP can reach it
+    allowedHosts: true,    // accept any Host header (EC2 public DNS / IP)
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
   },
 });

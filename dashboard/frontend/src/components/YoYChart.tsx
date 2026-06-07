@@ -138,7 +138,8 @@ export default function YoYChart() {
           </span>
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={300}>
+      <div className="h-[200px] sm:h-[300px]">
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}>
           <defs>
             <linearGradient id="gradYoY2026" x1="0" y1="0" x2="0" y2="1">
@@ -203,6 +204,7 @@ export default function YoYChart() {
           />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

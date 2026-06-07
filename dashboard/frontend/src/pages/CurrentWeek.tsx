@@ -166,7 +166,8 @@ export default function CurrentWeek() {
             <span className="chip">avg {weekAvg.toFixed(3)}M</span>
           )}
         >
-          <ResponsiveContainer width="100%" height={260}>
+          <div className="h-[200px] sm:h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.07)" />
               <XAxis dataKey="day" tick={{ fill: "#475569", fontSize: 12 }} tickLine={false} axisLine={false} />
@@ -185,6 +186,7 @@ export default function CurrentWeek() {
               )}
             </ComposedChart>
           </ResponsiveContainer>
+          </div>
         </GlassSection>
       </div>
 
@@ -212,7 +214,8 @@ export default function CurrentWeek() {
             </div>
           }
         >
-          <ResponsiveContainer width="100%" height={220}>
+          <div className="h-[180px] sm:h-[220px]">
+          <ResponsiveContainer width="100%" height="100%">
             <LineChart data={trackerData} margin={{ top: 6, right: 14, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.07)" />
               <XAxis dataKey="date" tick={{ fill: "#475569", fontSize: 12 }} tickLine={false} axisLine={false} />
@@ -222,6 +225,7 @@ export default function CurrentWeek() {
               <Line type="monotone" dataKey="Kalshi" stroke="#f59e0b" strokeWidth={2}   strokeDasharray="5 3" dot={{ r: 4, fill: "#f59e0b", strokeWidth: 0 }} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
+          </div>
         </GlassSection>
       )}
     </div>
