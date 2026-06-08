@@ -4,13 +4,6 @@ __pycache__/
 *.pem
 
 models/
-data/
 outputs/
 logs/
-*.pkl
-*.joblib
-*.parquet
-*.csv
-*.zip
-*.tar.gz
 .claude/

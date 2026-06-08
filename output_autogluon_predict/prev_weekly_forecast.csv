@@ -1,0 +1,8 @@
+Date,day_name,status,volume,pred_tabular,regime,pred_ts3,pred_prophet,pred_anchor
+2026-06-08,Monday,predicted,2795655.698336155,2779635.5,NORMAL,2788581.4556150534,2770856.2547792094,2826682.631627099
+2026-06-09,Tuesday,predicted,2322243.75,2322243.75,NORMAL,,,
+2026-06-10,Wednesday,predicted,2481372.5,2481372.5,NORMAL,,,
+2026-06-11,Thursday,predicted,2886976.75,2886976.75,NORMAL,,,
+2026-06-12,Friday,predicted,2882484.25,2882484.25,NORMAL,,,
+2026-06-13,Saturday,predicted,2484430.5,2484430.5,NORMAL,,,
+2026-06-14,Sunday,predicted,2926195.25,2926195.25,NORMAL,,,

@@ -1,0 +1,8 @@
+Date,day_name,status,volume
+2026-05-18,Monday,actual,2782578.0
+2026-05-19,Tuesday,actual,2313392.0
+2026-05-20,Wednesday,actual,2557265.0
+2026-05-21,Thursday,predicted,2928182.5
+2026-05-22,Friday,predicted,2907872.25
+2026-05-23,Saturday,predicted,2435947.5
+2026-05-24,Sunday,predicted,2725419.75

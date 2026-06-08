@@ -1,0 +1,6 @@
+feature,contribution_passengers,current_value,baseline_value,importance_rank,importance_passengers
+lag365_residual_anchor,62082,2826054.3571428573,2467997.714285714,1,55732
+anchor_accel_adjusted,37114,2806779.7223546715,2492745.254780394,3,24818
+vol_diff_1,-12248,506494.0,27280.0,2,39890
+Volume_lag3,4582,2710489.0,2364307.5,4,17028
+days_to_holiday_x_dow,-116,0.0,16.0,5,15411

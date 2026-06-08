@@ -1,0 +1,45 @@
+# /etc/systemd/system/tsa-dashboard-api.service
+#
+# Placeholders (replaced by deploy/setup.sh):
+#   __USER__         — Linux user that owns the project (e.g. manit)
+#   __PROJECT_DIR__  — absolute path to the tsa/ repo root
+#   __PYTHON__       — absolute path to the python binary (venv or system)
+
+[Unit]
+Description=TSA Dashboard FastAPI backend (uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__PROJECT_DIR__/dashboard/backend
+
+# Load Kalshi + Telegram secrets from the project .env
+EnvironmentFile=__PROJECT_DIR__/.env
+
+# Bind to loopback only — nginx is the only thing that should talk to it.
+ExecStart=__PYTHON__ -m uvicorn main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --proxy-headers \
+    --forwarded-allow-ips 127.0.0.1
+
+Restart=on-failure
+RestartSec=3s
+
+# ── Hardening ──
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=__PROJECT_DIR__
+
+# Log to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tsa-dashboard-api
+
+[Install]
+WantedBy=multi-user.target

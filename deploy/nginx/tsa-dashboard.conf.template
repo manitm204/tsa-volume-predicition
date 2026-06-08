@@ -1,0 +1,114 @@
+# /etc/nginx/sites-available/tsa-dashboard.conf
+#
+# Placeholders (replaced by deploy/setup.sh):
+#   __DOMAIN__       — apex domain, e.g. tsaedge.com
+#   __FRONTEND_ROOT__ — absolute path to the built SPA, e.g. /home/manit/tsa/dashboard/frontend/dist
+#
+# Architecture:
+#   Cloudflare (CDN / TLS at the edge)
+#       │   strict-pulls TLS to origin (mTLS, client cert signed by CF root)
+#       ▼
+#   nginx :443 on this VM
+#       ├── /        → static SPA  (vite build → dist/)
+#       └── /api/*   → uvicorn @ 127.0.0.1:8000
+
+# ─── HTTP → HTTPS redirect (covers direct IP probes too) ────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__ www.__DOMAIN__;
+    return 301 https://__DOMAIN__$request_uri;
+}
+
+# ─── www → apex (canonical hostname) ────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name www.__DOMAIN__;
+
+    ssl_certificate     /etc/ssl/cloudflare/origin.pem;
+    ssl_certificate_key /etc/ssl/cloudflare/origin.key;
+
+    # Authenticated Origin Pulls — only accept connections from Cloudflare
+    ssl_client_certificate /etc/ssl/cloudflare/authenticated_origin_pull_ca.pem;
+    ssl_verify_client on;
+
+    return 301 https://__DOMAIN__$request_uri;
+}
+
+# ─── Main site ──────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __DOMAIN__;
+
+    # ── TLS (Cloudflare origin cert) ──
+    ssl_certificate     /etc/ssl/cloudflare/origin.pem;
+    ssl_certificate_key /etc/ssl/cloudflare/origin.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # ── Authenticated Origin Pulls ──
+    # Cloudflare presents a client cert signed by their root CA on every
+    # request; nginx rejects anything else. Stops scrapers/attackers from
+    # bypassing Cloudflare by hitting the origin IP directly.
+    ssl_client_certificate /etc/ssl/cloudflare/authenticated_origin_pull_ca.pem;
+    ssl_verify_client on;
+
+    # ── Security headers ──
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options        "SAMEORIGIN" always;
+    add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy     "geolocation=(), microphone=(), camera=()" always;
+
+    # ── Trust Cloudflare's real-IP header ──
+    # CF sets CF-Connecting-IP with the visitor's real address.
+    real_ip_header CF-Connecting-IP;
+    # CF IP ranges are pulled in via /etc/nginx/conf.d/cloudflare-ips.conf
+    # (installed by setup.sh).
+
+    # Reasonable upload size for any future POST endpoints
+    client_max_body_size 4m;
+
+    # ── Static SPA (vite build) ──
+    root  __FRONTEND_ROOT__;
+    index index.html;
+
+    # Long-cache fingerprinted assets
+    location /assets/ {
+        access_log off;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # SPA fallback: anything that isn't a real file → index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+        # Don't cache the shell; we want users to pick up new asset hashes.
+        add_header Cache-Control "no-cache";
+    }
+
+    # ── API proxy → uvicorn ──
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # Hide nginx version
+    server_tokens off;
+
+    # Quiet a couple of noisy probes
+    location = /favicon.ico { log_not_found off; access_log off; }
+    location = /robots.txt  { log_not_found off; access_log off; }
+}

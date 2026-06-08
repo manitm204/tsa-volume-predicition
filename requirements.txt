@@ -1,0 +1,26 @@
+# TSA trading pipeline — runtime requirements
+# Floors reflect the versions this project is currently developed against.
+# Pin majors where the API surface changes between majors.
+
+# ── Data + numerics ──────────────────────────────────────────────────────────
+pandas>=2.3,<3
+numpy>=2.1,<3
+scipy>=1.16,<2
+scikit-learn>=1.7,<2
+matplotlib>=3.10,<4
+
+# ── HTTP + secrets ───────────────────────────────────────────────────────────
+requests>=2.32,<3
+cryptography>=46,<47        # Kalshi RSA-PSS-SHA256 signing
+python-dotenv>=1.2,<2       # .env loader (optional but used)
+
+# ── Forecasting models ───────────────────────────────────────────────────────
+autogluon>=1.5,<2           # production model + ts3 shadow model
+prophet>=1.3,<2             # ensemble member
+
+# ── Persistence (optional; db.py silently skips writes if missing) ───────────
+psycopg2-binary>=2.9,<3
+
+# ── Dashboard backend (FastAPI) ──────────────────────────────────────────────
+fastapi>=0.136,<1
+uvicorn[standard]>=0.41,<1

@@ -1,0 +1,5 @@
+type,pct,ticker,price,best_ask,target_shares,exposure_before,shares,dry_run,side,model_prob,market_prob
+passive_limit,0.05,KXTSAW-26JUN07-A2.60,0.2872560260778462,0.36,20,0,20,True,yes,0.3430011465994032,0.335
+passive_limit,0.1,KXTSAW-26JUN07-A2.60,0.2505166459787661,0.36,47,20,27,True,yes,0.3430011465994032,0.335
+passive_limit,0.15,KXTSAW-26JUN07-A2.60,0.20978385499935126,0.36,84,47,37,True,yes,0.3430011465994032,0.335
+passive_limit,0.2,KXTSAW-26JUN07-A2.60,0.16436913402230247,0.36,143,84,59,True,yes,0.3430011465994032,0.335
