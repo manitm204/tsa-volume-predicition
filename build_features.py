@@ -128,8 +128,18 @@ def lag365_naive(train_series, horizon):
 # ==========================================================================
 # Helpers
 # ==========================================================================
+# Dropped for r>0.8 pairwise correlation with a higher-importance feature
+# (XGBoost comparison: 73,798 vs 74,810 MAE on the 34-feature set)
+DROPPED_CORRELATED_FEATURES = [
+    "vol_same_dow_median_8w", "log_Volume_lag7", "week_vol_cumsum", "last_week_avg",
+    "week_accel_ratio", "nearest_holiday_aligned_lag", "Volume_lag7",
+    "anchor_accel_adjusted", "lag7_x_dow_share",
+]
+
+
 def get_feature_columns(df):
-    return [c for c in df.columns if c not in ["Date", TARGET_COL]]
+    exclude = {"Date", TARGET_COL, *DROPPED_CORRELATED_FEATURES}
+    return [c for c in df.columns if c not in exclude]
 
 
 def load_master(path=MASTER_PATH):
@@ -495,6 +505,54 @@ def add_lag365_same_dow(df, target_col=TARGET_COL):
             if key in lookup: vals.append(lookup[key])
         if vals: same_dow_ly_3w[i] = np.mean(vals)
     df["lag365_same_dow_3w_mean"] = same_dow_ly_3w
+
+    # ── Holiday-drift contamination check ──────────────────────────────
+    # lag365_same_dow aligns on (ISO week, weekday) a year back, but movable
+    # holidays (Labor Day, Easter, Thanksgiving) don't sit on a fixed ISO
+    # week every year — so the reference date can land on a pre-holiday
+    # travel spike even when the current date isn't near any holiday.
+    # "Holiday-adjacent" is defined by the same asymmetric windows
+    # production_router.py already uses for regime classification (7 days
+    # pre-holiday, 10 days post-holiday) rather than a new arbitrary
+    # threshold — keeps this consistent with how the rest of the system
+    # already decides what counts as a holiday-influenced day.
+    if "days_to_holiday_signed" in df.columns:
+        from production_router import SHOULDER_PRE_WINDOW, SHOULDER_POST_WINDOW
+
+        def _is_holiday_adjacent(signed_dth):
+            return -SHOULDER_PRE_WINDOW <= signed_dth <= SHOULDER_POST_WINDOW
+
+        dth_signed = df["days_to_holiday_signed"].values
+        dth_lookup = {(year[i], woy[i], dow[i]): dth_signed[i] for i in range(len(df))}
+
+        same_dow_ly_clean = same_dow_ly.copy()
+        contaminated_flag = np.zeros(len(df), dtype=int)
+        for i in range(len(df)):
+            ref_dth = dth_lookup.get((year[i] - 1, woy[i], dow[i]))
+            if ref_dth is None or np.isnan(dth_signed[i]):
+                continue
+            if not _is_holiday_adjacent(dth_signed[i]) and _is_holiday_adjacent(ref_dth):
+                contaminated_flag[i] = 1
+                alt_vals = []
+                for wo in (-1, 1, -2, 2):
+                    target_woy = woy[i] + wo
+                    if target_woy < 1: target_woy = 52
+                    elif target_woy > 52: target_woy = 1
+                    alt_key = (year[i] - 1, target_woy, dow[i])
+                    alt_ref_dth = dth_lookup.get(alt_key)
+                    if alt_key in lookup and (alt_ref_dth is None or not _is_holiday_adjacent(alt_ref_dth)):
+                        alt_vals.append(lookup[alt_key])
+                    if len(alt_vals) >= 2:
+                        break
+                if alt_vals:
+                    same_dow_ly_clean[i] = np.mean(alt_vals)
+
+        df["lag365_same_dow_holiday_safe"] = same_dow_ly_clean
+        df["lag365_same_dow_contaminated"] = contaminated_flag
+    else:
+        df["lag365_same_dow_holiday_safe"] = same_dow_ly
+        df["lag365_same_dow_contaminated"] = 0
+
     return df
 
 
@@ -785,9 +843,17 @@ def add_regime_and_decay_features(df, target_col=TARGET_COL):
         df["recent_vol_vs_expected_14d"] = ratio_s.rolling(14, min_periods=5).mean().values
 
     # ── 2) Regime vs lag365 anchor ────────────────────────────────────
+    # vals is yesterday's actual volume (whatever day of week that was), so
+    # it must be compared against yesterday's own year-ago same-weekday
+    # value — not today's lag365_same_dow, which is a different day of
+    # week. Dividing yesterday's level by today's DOW benchmark mixes two
+    # structurally different volume levels (e.g. Friday's actual over
+    # Saturday's year-ago baseline) and produces spurious ratio spikes
+    # whenever yesterday and today sit on different sides of the weekly
+    # volume curve.
     if "lag365_same_dow" in df.columns:
-        lag365 = df["lag365_same_dow"].values
-        ratio_to_ly = np.where(lag365 > 0, vals / lag365, np.nan)
+        lag365_prev = df["lag365_same_dow"].shift(1).values
+        ratio_to_ly = np.where(lag365_prev > 0, vals / lag365_prev, np.nan)
         ratio_ly_s = pd.Series(ratio_to_ly)
         df["recent_vol_vs_lag365_7d"] = ratio_ly_s.rolling(7, min_periods=3).mean().values
         df["recent_vol_vs_lag365_14d"] = ratio_ly_s.rolling(14, min_periods=5).mean().values
@@ -820,12 +886,16 @@ def add_regime_and_decay_features(df, target_col=TARGET_COL):
     df["fri_sat_sum_vs_expected"] = fri_sat_sum_vs_expected
 
     # ── 6) Regime-adjusted anchors ────────────────────────────────────
-    if "lag365_same_dow" in df.columns and "recent_vol_vs_lag365_7d" in df.columns:
-        df["lag365_regime_adjusted_7d"] = df["lag365_same_dow"] * df["recent_vol_vs_lag365_7d"]
-    if "lag365_same_dow" in df.columns and "recent_vol_vs_lag365_14d" in df.columns:
-        df["lag365_regime_adjusted_14d"] = df["lag365_same_dow"] * df["recent_vol_vs_lag365_14d"]
-    if "lag365_same_dow" in df.columns and "recent_vol_vs_lag365_7d" in df.columns:
-        df["lag365_final_anchor"] = df["lag365_same_dow"] * df["recent_vol_vs_lag365_7d"]
+    # Use the holiday-drift-cleaned lag365 reference where available (see
+    # add_lag365_same_dow) so a movable holiday in the reference year
+    # doesn't inflate these when the current date isn't holiday-adjacent.
+    _lag365_anchor_col = "lag365_same_dow_holiday_safe" if "lag365_same_dow_holiday_safe" in df.columns else "lag365_same_dow"
+    if _lag365_anchor_col in df.columns and "recent_vol_vs_lag365_7d" in df.columns:
+        df["lag365_regime_adjusted_7d"] = df[_lag365_anchor_col] * df["recent_vol_vs_lag365_7d"]
+    if _lag365_anchor_col in df.columns and "recent_vol_vs_lag365_14d" in df.columns:
+        df["lag365_regime_adjusted_14d"] = df[_lag365_anchor_col] * df["recent_vol_vs_lag365_14d"]
+    if _lag365_anchor_col in df.columns and "recent_vol_vs_lag365_7d" in df.columns:
+        df["lag365_final_anchor"] = df[_lag365_anchor_col] * df["recent_vol_vs_lag365_7d"]
     if "lag365_same_dow_3w_mean" in df.columns and "lag365_final_anchor" in df.columns:
         df["lag365_blend_anchor"] = 0.7 * df["lag365_same_dow_3w_mean"] + 0.3 * df["lag365_final_anchor"]
     if "friday_saturday_strength" in df.columns and "recent_vol_vs_expected_7d" in df.columns:
@@ -886,6 +956,15 @@ def add_regime_and_decay_features(df, target_col=TARGET_COL):
         storm = df["vol_wtd_storm_impact"]
         df["storm_impact_sq"] = storm ** 2
         df["storm_severe_flag"] = (storm > 0.5).astype(int)
+        # storm_echo_flag: was THIS SAME calendar day one year ago (t-364,
+        # same weekday) itself a full STORM day (matches production_router's
+        # STORM trigger: severe_flag==1 AND impact_sq>=2)? yoy_delta's t-364
+        # anchor reaches back that far even though its t-7/t-14 terms don't,
+        # so a day whose only disqualifier is a storm-contaminated YoY
+        # anchor still isn't a clean NORMAL day. Assumes daily-contiguous
+        # rows (no calendar gaps), verified true for the master dataset.
+        storm_full_flag = ((df["storm_severe_flag"] == 1) & (df["storm_impact_sq"] >= 2.0)).astype(int)
+        df["storm_echo_flag"] = storm_full_flag.shift(364).fillna(0).astype(int)
     if "vol_wtd_storm_impact" in df.columns and "recent_vol_vs_expected_7d" in df.columns:
         df["storm_x_regime"] = df["vol_wtd_storm_impact"] * df["recent_vol_vs_expected_7d"]
 
@@ -938,10 +1017,23 @@ def add_regime_and_decay_features(df, target_col=TARGET_COL):
                  "fri_vs_expected", "fri_sat_sum_vs_expected"]:
         if col in df.columns: df[col] = df[col].clip(lower=0.6, upper=1.4)
 
-    df["anchor_master"] = (
+    # lag365_final_anchor and lag365_regime_adjusted_7d both depend on the
+    # 7-day recent_vol_vs_lag365_7d ratio, which needs real Volume history in
+    # its trailing window — for far-out predicted days (batch-built feature
+    # frames covering a whole week ahead) that window runs dry and the ratio
+    # is NaN. The blanket ffill cleanup at the end of this pipeline would
+    # otherwise silently carry a stale day's *already-multiplied* anchor
+    # value forward (e.g. Friday's finished number reused as Saturday's),
+    # discarding Saturday's own lag365 base entirely. Renormalize onto the
+    # 14-day ratio instead when that happens — it has enough real days in
+    # its longer window to stay valid across a full week-ahead horizon.
+    _anchor_7d_valid = df["lag365_final_anchor"].notna() & df["lag365_regime_adjusted_7d"].notna()
+    df["anchor_master"] = np.where(
+        _anchor_7d_valid,
         0.45 * df["lag365_final_anchor"] +
         0.35 * df["lag365_regime_adjusted_14d"] +
-        0.20 * df["lag365_regime_adjusted_7d"]
+        0.20 * df["lag365_regime_adjusted_7d"],
+        df["lag365_regime_adjusted_14d"],
     )
 
     df["anchor_gap_7d"] = (
@@ -1007,6 +1099,144 @@ def add_regime_and_decay_features(df, target_col=TARGET_COL):
         df["recent_vol_vs_expected_3d"] - df["recent_vol_vs_expected_7d"]
     )
 
+    return df
+
+
+# ==========================================================================
+# YoY-delta ensemble member (replaces Prophet in the production router)
+# ==========================================================================
+def compute_days_to_holiday_signed(dates):
+    """Standalone version of add_holiday_features's days_to_holiday_signed,
+    for callers (e.g. OOF/sigma scripts) that only have a bare dates series
+    and don't want to run the full feature pipeline. Same holiday set
+    (US federal + Easter + Halloween); positive = days since the nearest
+    holiday, negative = days until it.
+    """
+    dates = pd.to_datetime(pd.Series(dates)).reset_index(drop=True)
+    cal = USFederalHolidayCalendar()
+    fed = pd.to_datetime(cal.holidays(start=dates.min(), end=dates.max() + pd.Timedelta(days=400)))
+    major = _get_major_holiday_dates(sorted(dates.dt.year.unique()))
+    all_h = pd.DatetimeIndex(
+        pd.concat([fed.to_series(), major["easter"].to_series(), major["halloween"].to_series()])
+    ).sort_values().drop_duplicates()
+
+    hdays = all_h.values.astype("datetime64[D]")
+    alld = dates.values.astype("datetime64[D]")
+    signed = []
+    for day in alld:
+        diffs = hdays - day
+        idx = np.argmin(np.abs(diffs))
+        signed.append(int(diffs[idx].astype("timedelta64[D]").astype(int)))
+    return pd.Series([-x for x in signed], index=dates.index)
+
+
+def yoy_delta_trend_available_for_dates(dates):
+    """yoy_delta_trend_available (see add_yoy_delta_feature) for a bare dates
+    series, without needing Volume/the full feature pipeline — just the
+    contaminated_1 half of the guard (D, D-7, D-371 holiday-adjacency),
+    which is all that determines availability.
+
+    Looks up D-7/D-371 by calendar date rather than positional .shift(),
+    since callers (e.g. OOF dataframes) aren't guaranteed to be a gap-free
+    daily sequence the way the full feature pipeline's df is. Returns a 0/1
+    Series aligned to `dates`' original index.
+    """
+    from production_router import SHOULDER_PRE_WINDOW, SHOULDER_POST_WINDOW
+
+    dates = pd.to_datetime(pd.Series(dates))
+    # Compute over the requested dates PLUS their D-7/D-371 references, so
+    # the holiday-adjacency lookup covers dates that may not themselves be
+    # in the input (e.g. a gap in the OOF calendar).
+    all_needed = pd.concat([dates, dates - pd.Timedelta(days=7), dates - pd.Timedelta(days=371)])
+    all_needed = all_needed.drop_duplicates().reset_index(drop=True)
+    dth_lookup = compute_days_to_holiday_signed(all_needed)
+    dth_lookup.index = all_needed.values
+
+    def _is_holiday_adjacent(x):
+        return (x >= -SHOULDER_PRE_WINDOW) & (x <= SHOULDER_POST_WINDOW)
+
+    d_flag    = _is_holiday_adjacent(dth_lookup.reindex(dates.values).values)
+    d7_flag   = _is_holiday_adjacent(dth_lookup.reindex((dates - pd.Timedelta(days=7)).values).values)
+    d371_flag = _is_holiday_adjacent(dth_lookup.reindex((dates - pd.Timedelta(days=371)).values).values)
+    contaminated_1 = d_flag | d7_flag | d371_flag
+    return pd.Series((~contaminated_1).astype(int), index=dates.index)
+
+
+YOY_DELTA_WEEKS = 5  # number of trailing same-weekday weeks pooled
+
+
+def add_yoy_delta_feature(df, target_col=TARGET_COL):
+    """pred_yoy_delta(D) = ly(D) + mean_k(delta_k)  over k = 1..YOY_DELTA_WEEKS,
+    where delta_k = Volume(D-7k) - Volume(D-7k-364) is how much the same
+    weekday k weeks ago ran above/below the same weekday a year earlier, and
+    ly(D) is the holiday-safe year-ago same-weekday value.
+
+    Two holiday guards (both validated on normal-regime days, 2026-09-30
+    drop-variant sweep — MAE 55.1k / RMSE 78.8k vs 59.7k / 89.3k for the old
+    2-week zero-on-contamination form):
+      * base ly uses lag365_same_dow_holiday_safe, so a movable holiday
+        (Easter, Labor Day, Thanksgiving) in D's own reference year can't
+        distort the anchor.
+      * a weekly delta whose this-year date OR its year-ago lag falls in a
+        holiday shoulder window is DROPPED and replaced by carrying the
+        nearest clean more-recent week forward (not zeroed) — dropping beat
+        neighbour-substitution by ~4.5% MAE. Widening 2->5 weeks damps the
+        week-to-week noise that made the old 2-week form whipsaw.
+
+    Deterministic and backward-looking only (like anchor_master) — no training.
+    """
+    df = df.copy()
+    vol = df[target_col]
+    ly = df["lag365_same_dow_holiday_safe"] if "lag365_same_dow_holiday_safe" in df.columns else vol.shift(364)
+    N = YOY_DELTA_WEEKS
+    n = len(df)
+
+    deltas = np.full((n, N), np.nan)
+    contaminated = np.ones((n, N), dtype=bool)  # default dirty (missing history)
+    if "days_to_holiday_signed" in df.columns:
+        from production_router import SHOULDER_PRE_WINDOW, SHOULDER_POST_WINDOW
+
+        def _is_holiday_adjacent(x):
+            return (x >= -SHOULDER_PRE_WINDOW) & (x <= SHOULDER_POST_WINDOW)
+
+        dth = df["days_to_holiday_signed"]
+        for k in range(1, N + 1):
+            dk = vol.shift(7 * k) - vol.shift(7 * k + 364)
+            deltas[:, k - 1] = dk.values
+            cont = (_is_holiday_adjacent(dth.shift(7 * k))
+                    | _is_holiday_adjacent(dth.shift(7 * k + 364)))
+            contaminated[:, k - 1] = cont.fillna(True).values | np.isnan(dk.values)
+        holiday_aware = True
+    else:
+        for k in range(1, N + 1):
+            dk = vol.shift(7 * k) - vol.shift(7 * k + 364)
+            deltas[:, k - 1] = dk.values
+            contaminated[:, k - 1] = np.isnan(dk.values)
+        holiday_aware = False
+
+    # Carry-forward resolution: a dirty week reuses the nearest clean
+    # more-recent week's delta; leading dirty weeks are back-seeded with the
+    # first clean week. Rows with no clean week at all fall back to naive ly.
+    resolved = np.full((n, N), np.nan)
+    n_clean = np.zeros(n, dtype=int)
+    for i in range(n):
+        last = np.nan
+        for k in range(N):
+            if not contaminated[i, k] and not np.isnan(deltas[i, k]):
+                last = deltas[i, k]; resolved[i, k] = deltas[i, k]; n_clean[i] += 1
+            else:
+                resolved[i, k] = last
+        if np.isnan(resolved[i, 0]) and n_clean[i] > 0:
+            first_clean = resolved[i, np.argmax(~np.isnan(resolved[i]))]
+            resolved[i] = np.where(np.isnan(resolved[i]), first_clean, resolved[i])
+
+    count = np.sum(~np.isnan(resolved), axis=1)
+    mean_delta = np.where(count > 0, np.nansum(resolved, axis=1) / np.maximum(count, 1), 0.0)
+
+    df["pred_yoy_delta"] = ly.values + mean_delta
+    # Trend "available" when at least one clean same-weekday week exists, i.e.
+    # the correction carries real signal rather than degrading to naive ly.
+    df["yoy_delta_trend_available"] = (n_clean >= 1).astype(int) if holiday_aware else 1
     return df
 
 
@@ -1663,9 +1893,13 @@ def add_group_features(df, target_col=TARGET_COL):
     )
 
     # ── Group 4: Anchor Reliability ───────────────────────────────────────
+    # _sh is yesterday's actual volume, so it must be compared against
+    # yesterday's own year-ago same-weekday value (shift(1) of
+    # lag365_same_dow), not today's — otherwise the error/ratio mixes two
+    # different days of the week (see recent_vol_vs_lag365_7d fix above).
     if "lag365_same_dow" in df.columns:
         _sh = df[target_col].shift(1).values
-        _l3 = df["lag365_same_dow"].values
+        _l3 = df["lag365_same_dow"].shift(1).values
         _valid_a = _l3 > 0
 
         _err = np.where(_valid_a, _sh - _l3, np.nan)
@@ -1952,16 +2186,22 @@ def add_anchor_family_features(df, target_col=TARGET_COL):
         df["lag365_same_dow_5w_clean"] = lag365_5w_clean
 
     # 9. lag365_x_recent_regime — lag365 × recent_vol_vs_expected_14d
-    if "lag365_same_dow" in df.columns and "recent_vol_vs_expected_14d" in df.columns:
+    _lag365_col_9 = "lag365_same_dow_holiday_safe" if "lag365_same_dow_holiday_safe" in df.columns else "lag365_same_dow"
+    if _lag365_col_9 in df.columns and "recent_vol_vs_expected_14d" in df.columns:
         df["lag365_x_recent_regime"] = (
-            df["lag365_same_dow"] * df["recent_vol_vs_expected_14d"]
+            df[_lag365_col_9] * df["recent_vol_vs_expected_14d"]
         )
 
     # 10. lag365_residual_anchor — lag365 + 14d rolling mean of recent residuals
-    if "lag365_same_dow" in df.columns:
-        _resid = df[target_col].shift(1) - df["lag365_same_dow"]
+    # The residual must be computed on a DOW-consistent basis: yesterday's
+    # actual minus yesterday's own year-ago benchmark (shift(1) of
+    # _lag365_col_10), not today's — then the averaged correction is added
+    # onto today's own (unshifted) anchor value.
+    _lag365_col_10 = "lag365_same_dow_holiday_safe" if "lag365_same_dow_holiday_safe" in df.columns else "lag365_same_dow"
+    if _lag365_col_10 in df.columns:
+        _resid = df[target_col].shift(1) - df[_lag365_col_10].shift(1)
         df["lag365_residual_anchor"] = (
-            df["lag365_same_dow"] + _resid.rolling(14, min_periods=5).mean()
+            df[_lag365_col_10] + _resid.rolling(14, min_periods=5).mean()
         )
 
     # ── Family 3: Week Projection ─────────────────────────────────────────
@@ -2299,6 +2539,8 @@ def build_features_from_df(df, verbose=True, prune=True):
     df = add_volume_context_features(df, TARGET_COL)
     log("Adding regime, decay, and targeted features...")
     df = add_regime_and_decay_features(df, TARGET_COL)
+    log("Adding YoY-delta ensemble feature...")
+    df = add_yoy_delta_feature(df, TARGET_COL)
     log("Adding new same-DOW and contextual features...")
     df = add_new_features(df, TARGET_COL)
     log("Adding group features (same-DOW trend, week pace, YoY regime, anchor reliability, week shape, holiday)...")

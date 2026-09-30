@@ -48,6 +48,7 @@ _DAILY_SERIES      = "KXTRUFTSA"
 # FastAPI dashboard (whose CWD is dashboard/backend/).
 _REPO_ROOT       = Path(__file__).resolve().parent
 OUT_DIR          = _REPO_ROOT / "output_kalshi"
+ARCHIVE_DIR      = OUT_DIR / "archive"             # per-run timestamped CSVs (historical only)
 SUMMARY_PATH       = _REPO_ROOT / "output_autogluon_predict" / "weekly_summary.csv"
 DAILY_SUMMARY_PATH = _REPO_ROOT / "output_autogluon_predict" / "daily_summary.csv"
 POSITIONS_PATH     = OUT_DIR / "positions.json"   # local position cache
@@ -112,7 +113,10 @@ def _load_auth() -> _KalshiAuth:
         raise EnvironmentError("KALSHI_KEY_ID env var not set")
     if not pem_path:
         raise EnvironmentError("KALSHI_PRIVATE_KEY_PATH env var not set")
-    return _KalshiAuth(key_id, Path(pem_path).read_bytes())
+    p = Path(pem_path)
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parent / p
+    return _KalshiAuth(key_id, p.read_bytes())
 
 
 def _base() -> str:
@@ -247,6 +251,21 @@ def _extract_daily_threshold_millions(ticker: str) -> float | None:
             val = int(part[1:])
             if 500_000 < val < 10_000_000:
                 return round(val / 1e6, 6)
+    return None
+
+
+def _extract_daily_date(ticker: str):
+    """Parse the market date from KXTRUFTSA-26JUN04-T2820000 style tickers.
+
+    Returns a datetime.date, or None if no YYMMMDD segment is present.
+    """
+    from datetime import datetime as _dt
+    for part in ticker.split("-"):
+        if len(part) == 7 and part[:2].isdigit() and part[2:5].isalpha() and part[5:].isdigit():
+            try:
+                return _dt.strptime(part, "%y%b%d").date()
+            except ValueError:
+                continue
     return None
 
 
@@ -1060,6 +1079,24 @@ def fee_adjusted_cost_per_share(price: float, fee_rate: float = 0.07) -> float:
     return price + fee_rate * price * (1.0 - price)
 
 
+# Below LONGSHOT_FLOOR the stake is voided outright (scale = 0); between the
+# floor and LONGSHOT_TARGET it ramps up linearly; at/above the target it's
+# full size (scale = 1). Cheap asks are where model tail-calibration is
+# least trustworthy, so full Kelly size on a 10c longshot is not warranted
+# just because the model's edge estimate looks huge there.
+LONGSHOT_FLOOR: float = 0.10
+LONGSHOT_TARGET: float = 0.25
+
+
+def longshot_scale(price: float, floor: float = LONGSHOT_FLOOR, target: float = LONGSHOT_TARGET) -> float:
+    """Stake multiplier that tapers to 0 as price drops toward `floor`."""
+    if price <= floor:
+        return 0.0
+    if price >= target:
+        return 1.0
+    return (price - floor) / (target - floor)
+
+
 def shares_for_pct(
     *,
     pct: float,
@@ -1068,7 +1105,7 @@ def shares_for_pct(
     kelly_fraction: float = 0.5,
     fee_rate: float = 0.07,
 ) -> int:
-    dollars_to_risk = pct * bankroll * kelly_fraction
+    dollars_to_risk = pct * bankroll * kelly_fraction * longshot_scale(price)
     cost_per_share  = fee_adjusted_cost_per_share(price, fee_rate)
     if cost_per_share <= 0:
         return 0
@@ -1094,23 +1131,22 @@ def place_yes_limit_order(
 ) -> dict:
     if shares < 1:
         raise ValueError("shares must be >= 1")
-    price_cents = int(round(price * 100))
-    if not 1 <= price_cents <= 99:
-        raise ValueError(f"yes_price must be 1..99 cents, got {price_cents} (from {price})")
+    if not 0.01 <= price <= 0.99:
+        raise ValueError(f"yes_price must be 0.01..0.99, got {price}")
     payload = {
-        "ticker":          ticker,
-        "side":            "yes",
-        "action":          "buy",
-        "type":            "limit",
-        "client_order_id": str(uuid.uuid4()),
-        "count":           int(shares),
-        "yes_price":       price_cents,
-        "post_only":       post_only,
+        "ticker":                     ticker,
+        "side":                       "bid",
+        "client_order_id":            str(uuid.uuid4()),
+        "count":                      f"{int(shares)}.00",
+        "price":                      f"{round(price, 2):.4f}",
+        "time_in_force":              "good_till_canceled",
+        "self_trade_prevention_type": "taker_at_cross",
+        "post_only":                  post_only,
     }
     if expiration_ts is not None:
-        payload["expiration_ts"] = expiration_ts
+        payload["expiration_time"] = int(expiration_ts)
     auth = _load_auth()
-    return _post("/portfolio/orders", auth, payload=payload)
+    return _post("/portfolio/events/orders", auth, payload=payload)
 
 
 def buy_yes_aggressive_limit(*, ticker: str, ask_price: float, shares: int) -> dict:
@@ -1143,23 +1179,23 @@ def place_no_limit_order(
 ) -> dict:
     if shares < 1:
         raise ValueError("shares must be >= 1")
-    price_cents = int(round(price * 100))
-    if not 1 <= price_cents <= 99:
-        raise ValueError(f"no_price must be 1..99 cents, got {price_cents} (from {price})")
+    if not 0.01 <= price <= 0.99:
+        raise ValueError(f"no_price must be 0.01..0.99, got {price}")
+    yes_price = 1.0 - price
     payload = {
-        "ticker":          ticker,
-        "side":            "no",
-        "action":          "buy",
-        "type":            "limit",
-        "client_order_id": str(uuid.uuid4()),
-        "count":           int(shares),
-        "no_price":        price_cents,
-        "post_only":       post_only,
+        "ticker":                     ticker,
+        "side":                       "ask",
+        "client_order_id":            str(uuid.uuid4()),
+        "count":                      f"{int(shares)}.00",
+        "price":                      f"{round(yes_price, 2):.4f}",
+        "time_in_force":              "good_till_canceled",
+        "self_trade_prevention_type": "taker_at_cross",
+        "post_only":                  post_only,
     }
     if expiration_ts is not None:
-        payload["expiration_ts"] = expiration_ts
+        payload["expiration_time"] = int(expiration_ts)
     auth = _load_auth()
-    return _post("/portfolio/orders", auth, payload=payload)
+    return _post("/portfolio/events/orders", auth, payload=payload)
 
 
 def buy_no_aggressive_limit(*, ticker: str, ask_price: float, shares: int) -> dict:
@@ -1226,14 +1262,12 @@ def execute_over_ladder(
         limit_price        = price_for_bankroll_pct(model_prob, pct, fee_rate)
         bought_at_this_pct = 0
 
-        if limit_price < 0.15 or limit_price > 0.97:
+        if limit_price < 0.2 or limit_price > 0.97:
             continue
 
         for ask_price, _ in yes_asks:
             if ask_price > limit_price:
                 break
-            if ask_price < 0.15 or ask_price > 0.97:
-                continue
 
             available = remaining.get(ask_price, 0)
             if available <= 0:
@@ -1359,14 +1393,12 @@ def execute_under_ladder(
         limit_price        = price_for_bankroll_pct(model_prob, pct, fee_rate)
         bought_at_this_pct = 0
 
-        if limit_price < 0.15 or limit_price > 0.97:
+        if limit_price < 0.2 or limit_price > 0.97:
             continue
 
         for ask_price, _ in no_asks:
             if ask_price > limit_price:
                 break
-            if ask_price < 0.15 or ask_price > 0.97:
-                continue
 
             available = remaining.get(ask_price, 0)
             if available <= 0:
@@ -1643,7 +1675,8 @@ def main() -> None:
         })
 
     snap_df = pd.DataFrame(snapshot_rows)
-    snap_df.to_csv(OUT_DIR / f"market_snapshot_{snapshot_ts}.csv", index=False)
+    ARCHIVE_DIR.mkdir(exist_ok=True)
+    snap_df.to_csv(ARCHIVE_DIR / f"market_snapshot_{snapshot_ts}.csv", index=False)
     snap_df.to_csv(OUT_DIR / "market_snapshot_latest.csv", index=False)
     print(f"\n[Snapshot] saved -> {OUT_DIR / 'market_snapshot_latest.csv'}")
     print(snap_df[["ticker", "strike_millions", "market_prob", "model_prob", "edge"]].to_string(index=False))
@@ -1736,9 +1769,60 @@ def main() -> None:
         print(f"[Daily] KXTRUFTSA markets  bankroll=${args.daily_bankroll:.0f}")
 
         daily_markets = fetch_tsa_daily_markets(debug=args.debug)
+        fetched_any   = bool(daily_markets)
+
+        # Only trade the market whose date is today. Kalshi lists KXTRUFTSA
+        # markets 3-4 days ahead, but daily_summary.csv holds probabilities for
+        # today only — applying them to a future-dated market would be wrong.
+        from datetime import date as _date
+        _today = _date.today()
+        if daily_markets:
+            kept = [m for m in daily_markets if _extract_daily_date(m.ticker) == _today]
+            dropped = len(daily_markets) - len(kept)
+            if dropped:
+                print(f"[Daily] Skipping {dropped} market(s) not dated {_today} "
+                      f"(trading only today's date).")
+            daily_markets = kept
+            if not daily_markets:
+                print(f"[Daily] No open daily market dated {_today} — skipping daily trading.")
+
         if daily_markets:
             thresholds    = sorted({m.strike_millions for m in daily_markets})
             daily_summary = _ensure_daily_probs(thresholds)
+
+            # Snapshot the full daily ladder unconditionally so the backlog
+            # captures market state even on days the model failed to run.
+            # model_prob / edge stay NULL when daily_summary is None.
+            try:
+                daily_snap_rows = []
+                for m in daily_markets:
+                    mp = None
+                    if daily_summary is not None:
+                        prob_col = f"p_over_{m.strike_millions}M"
+                        if prob_col in daily_summary.index and not pd.isna(daily_summary[prob_col]):
+                            mp = float(daily_summary[prob_col])
+                    daily_snap_rows.append({
+                        "ticker":          m.ticker,
+                        "strike_millions": m.strike_millions,
+                        "yes_bid_cents":   m.yes_bid_cents,
+                        "yes_ask_cents":   m.yes_ask_cents,
+                        "yes_mid_cents":   m.yes_mid_cents,
+                        "market_prob":     m.market_prob,
+                        "model_prob":      mp,
+                        "edge":            (mp - m.market_prob) if (mp is not None and m.market_prob is not None) else None,
+                        "volume":          m.volume,
+                        "open_interest":   m.open_interest,
+                    })
+                daily_snap_df = pd.DataFrame(daily_snap_rows)
+                ARCHIVE_DIR.mkdir(exist_ok=True)
+                daily_snap_df.to_csv(ARCHIVE_DIR / f"market_snapshot_daily_{snapshot_ts}.csv", index=False)
+                import db as _db
+                _db.write_market_snapshot(daily_snap_df)
+                print(f"[Daily] snapshot: {len(daily_snap_rows)} markets recorded "
+                      f"(model_prob {'available' if daily_summary is not None else 'NULL — model unavailable'})")
+            except Exception as exc:
+                import sys as _sys
+                print(f"[db] daily market snapshot write failed (non-fatal): {exc}", file=_sys.stderr)
 
             if daily_summary is not None:
                 for m in daily_markets:
@@ -1807,13 +1891,14 @@ def main() -> None:
                     _record_fills(m.ticker, yes_bought, no_bought, args.dry_run)
             else:
                 print("[Daily] Could not compute probabilities — skipping daily trading.")
-        else:
+        elif not fetched_any:
             print("[Daily] No open daily markets found.")
 
-    # Save actions
+    # Save actions (per-run CSV archived; Postgres `order_actions` is canonical)
     if all_actions:
         actions_df = pd.DataFrame(all_actions)
-        actions_path = OUT_DIR / f"actions_{snapshot_ts}.csv"
+        ARCHIVE_DIR.mkdir(exist_ok=True)
+        actions_path = ARCHIVE_DIR / f"actions_{snapshot_ts}.csv"
         actions_df.to_csv(actions_path, index=False)
         print(f"\n[Actions] {len(all_actions)} action(s) saved -> {actions_path}")
     else:

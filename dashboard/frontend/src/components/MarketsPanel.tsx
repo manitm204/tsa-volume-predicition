@@ -147,7 +147,7 @@ export function MarketsPanel({ scopeLabel, positions, openOrders, orderbook }: P
       {!!orderbook?.length && (
         <GlassSection
           title="Market Order Book"
-          sub="Live bid/ask for each strike · highlighted rows = ≥3% edge"
+          sub="Live bid/ask for each strike · highlighted rows = ≥5% edge"
           right={<span className="chip">{orderbook.length} markets</span>}
         >
           <div className="overflow-x-auto">
@@ -162,7 +162,7 @@ export function MarketsPanel({ scopeLabel, positions, openOrders, orderbook }: P
               <tbody>
                 {orderbook.map((row, i) => {
                   const edge    = row.model_prob != null && row.market_prob != null ? (row.model_prob - row.market_prob) : null;
-                  const hasEdge = edge != null && Math.abs(edge) >= 0.03;
+                  const hasEdge = edge != null && Math.abs(edge) >= 0.05;
                   return (
                     <tr key={i} style={hasEdge ? { background: "rgba(34,211,164,0.04)" } : {}}>
                       <td className="mono font-semibold text-slate-100">{row.strike_millions?.toFixed(2)}M</td>

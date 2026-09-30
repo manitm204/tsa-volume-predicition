@@ -1,0 +1,2 @@
+We built TSA · EDGE to solve a problem nobody asked us to solve: pricing airport security lines like a financial instrument.
+It has Kelly sizing, a signal grade, and a live order book. Model confidence: 87%. Wait time volatility: unpriced until now.

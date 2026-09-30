@@ -33,7 +33,7 @@ export interface WeekDay {
   error: number | null;
   regime?: string | null;
   pred_tabular?: number | null;
-  weights?: { tab: number; ts3: number; prophet: number; anchor: number } | null;
+  weights?: { tab: number; ts3: number; yoy_delta: number; anchor: number } | null;
   sigma_eff?: number | null;
 }
 
@@ -48,6 +48,18 @@ export interface WeeklyAvgTrackerPoint {
   date: string;
   model_avg_millions: number | null;
   kalshi_avg_millions: number | null;
+}
+
+export interface WeeklyAvgTrackerData {
+  week_monday: string | null;
+  points: WeeklyAvgTrackerPoint[];
+  settled_avg_millions: number | null;
+}
+
+export interface ForecastWeekOption {
+  week_monday: string;
+  settled_avg_millions: number | null;
+  is_current: boolean;
 }
 
 export interface ProbRow {
@@ -257,13 +269,13 @@ export interface ShadowPrediction {
   actual_volume: number | null;
   pred_tabular: number | null;
   pred_ts3: number | null;
-  pred_prophet: number | null;
+  pred_yoy_delta: number | null;
   pred_router: number | null;
   regime: "STORM" | "PEAK_HOLIDAY" | "SHOULDER_PRE" | "SHOULDER_POST" | "NORMAL" | null;
   alpha_storm: number | null;
   w_tab: number | null;
   w_ts3: number | null;
-  w_prophet: number | null;
+  w_yoy_delta: number | null;
   w_anchor: number | null;
   anchor_master: number | null;
   storm_severe_flag: number;
@@ -299,7 +311,7 @@ export interface EnsembleWeightRow {
   regime: string;
   tab: number | null;
   ts3: number | null;
-  prophet: number | null;
+  yoy_delta: number | null;
   anchor: number | null;
   sigma_raw: number;
   sigma_eff: number;
@@ -312,7 +324,7 @@ export interface EnsembleHistoryRow {
   predicted_volume: number | null;
   pred_tabular: number | null;
   regime: string | null;
-  weights: { tab: number; ts3: number; prophet: number; anchor: number } | null;
+  weights: { tab: number; ts3: number; yoy_delta: number; anchor: number } | null;
   sigma_eff: number | null;
 }
 
@@ -324,6 +336,55 @@ export interface EnsembleSummary {
   last_target_date: string | null;
 }
 
+// ── Dynamic NORMAL-regime weight refresh (refresh_normal_weights.py) ────────
+export interface ModelWeights {
+  tab: number;
+  ts3: number;
+  yoy_delta: number;
+  anchor: number;
+}
+
+export interface DynamicWeightsData {
+  has_data: boolean;
+  regime?: string;
+  model_order?: string[];
+  full_history_weights?: ModelWeights;
+  last30_weights?: ModelWeights;
+  blend_weights?: ModelWeights;
+  method?: string;
+  generated_at?: string | null;
+  n_full_history?: number | null;
+  n_last30?: number | null;
+  date_range?: [string, string] | null;
+  quick_tabular_oof_mae?: number | null;
+}
+
+// ── Day explorer — cycle through each day of the current week ────────────────
+export interface DayDetailRow {
+  date: string;
+  day_name: string;
+  status: "actual" | "predicted";
+  regime: string | null;
+  ensemble: number | null;
+  predicted: number | null;
+  actual: number | null;
+  error: number | null;
+  pred_tabular: number | null;
+  pred_ts3: number | null;
+  pred_yoy_delta: number | null;
+  pred_anchor: number | null;
+  weights: ModelWeights | null;
+  sigma_eff: number | null;
+  sigma_raw: number | null;
+  bell_curve: { x: number; y: number }[];
+}
+
+export interface DayDetailData {
+  days: DayDetailRow[];
+  week_start: string | null;
+  has_older_week: boolean;
+}
+
 // ── Tomorrow forecast ─────────────────────────────────────────────────────────
 export interface TomorrowData {
   has_data: boolean;
@@ -333,10 +394,10 @@ export interface TomorrowData {
   regime?: string;
   pred_tabular?: number | null;
   pred_ts3?: number | null;
-  pred_prophet?: number | null;
+  pred_yoy_delta?: number | null;
   pred_anchor?: number | null;
   pred_ensemble?: number | null;
-  weights?: { tab: number | null; ts3: number | null; prophet: number | null; anchor: number | null } | null;
+  weights?: { tab: number | null; ts3: number | null; yoy_delta: number | null; anchor: number | null } | null;
   sigma_raw?: number | null;
   sigma_eff?: number | null;
   bell_curve?: { x: number; y: number }[];

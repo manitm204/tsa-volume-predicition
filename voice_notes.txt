@@ -1,0 +1,28 @@
+Voice Audition Notes
+====================
+
+=== Edge TTS (Microsoft) — Free, no API key ===
+
+Liked:
+  en-GB-RyanNeural                 — British Male, Ryan
+  en-US-ChristopherNeural          — American Male, Christopher
+  en-AU-WilliamMultilingualNeural  — Australian Male, William  *** FAVORITE SO FAR ***
+
+Not preferred:
+  en-GB-ThomasNeural, en-US-GuyNeural, en-US-BrianNeural,
+  en-US-EricNeural, en-US-SteffanNeural, en-US-RogerNeural
+
+=== ElevenLabs — Free tier: 10k chars/month ===
+
+Liked:
+  Daniel - Steady Broadcaster          — British Male   *** LIKED ***
+  Brian - Deep, Resonant and Comforting — American Male  *** LIKED ***
+
+Not preferred:
+  George - Warm, Captivating Storyteller
+  Charlie - Deep, Confident, Energetic
+  Eric - Smooth, Trustworthy
+
+=== Google Cloud TTS — TODO ===
+
+Current jarvis.py uses: Kokoro bm_george (to be replaced)

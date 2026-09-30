@@ -37,8 +37,9 @@ from scipy.stats import norm
 from sklearn.linear_model import LogisticRegression
 
 from production_router import (
-    get_major_holiday_dates, days_to_nearest_major_signed,
-    STORM_TRIGGER_IMPACT, PEAK_HOLIDAY_WINDOW, SHOULDER_WINDOW,
+    get_major_holiday_dates, days_to_prior_and_next_major,
+    STORM_TRIGGER_IMPACT, PEAK_HOLIDAY_WINDOW,
+    SHOULDER_PRE_WINDOW, SHOULDER_POST_WINDOW,
 )
 
 # ── paths ──────────────────────────────────────────────────────────────────
@@ -48,17 +49,19 @@ WEATHER_PATH = os.path.join(ROOT, "data", "weather_national_features_with_lags.c
 OUT_JSON     = os.path.join(ROOT, "ensemble_experiment", "output", "platt_params.json")
 WEIGHTS_JSON = os.path.join(ROOT, "ensemble_experiment", "output", "best_weights.json")
 
-MODEL_COLS = ["pred_ag_tabular", "pred_ag_timeseries", "pred_prophet", "pred_anchor_master"]
+# yoy_delta dropped from production (2026-09-21) — see normal_weight_search.py.
+# Matches its MODEL_COLS order.
+MODEL_COLS = ["pred_ag_tabular", "pred_ag_timeseries", "pred_anchor_master"]
 
 # Load weights from normal_weight_search.py output if available; fall back to
 # the last-known good values so the script can still run standalone.
 _FALLBACK_WEIGHTS = {
-    "normal":        [0.450, 0.300, 0.000, 0.250],
-    "shoulder_pre":  [0.000, 0.079, 0.001, 0.920],
-    "shoulder_post": [0.950, 0.050, 0.000, 0.000],
-    "peak_holiday":  [1.000, 0.000, 0.000, 0.000],
-    "moderate_storm":[1.000, 0.000, 0.000, 0.000],
-    "severe_storm":  [1.000, 0.000, 0.000, 0.000],
+    "normal":        [0.333, 0.333, 0.333],
+    "shoulder_pre":  [0.300, 0.000, 0.700],
+    "shoulder_post": [0.333, 0.333, 0.333],
+    "peak_holiday":  [1.000, 0.000, 0.000],
+    "moderate_storm":[1.000, 0.000, 0.000],
+    "severe_storm":  [1.000, 0.000, 0.000],
 }
 if os.path.exists(WEIGHTS_JSON):
     with open(WEIGHTS_JSON) as _f:
@@ -89,17 +92,19 @@ def load_ensemble_oof():
 
     years    = sorted(oof["Date"].dt.year.unique())
     holidays = get_major_holiday_dates(range(min(years) - 1, max(years) + 2))
-    oof["days_to_major_signed"] = oof["Date"].apply(
-        lambda d: days_to_nearest_major_signed(d, holidays)
+    prior_next = oof["Date"].apply(
+        lambda d: pd.Series(days_to_prior_and_next_major(d, holidays),
+                            index=["days_prior", "days_next"])
     )
+    oof[["days_prior", "days_next"]] = prior_next
 
     def classify(row):
         if row["storm_severe_flag"] == 1:
             return "severe_storm" if row["storm_impact_sq"] >= STORM_TRIGGER_IMPACT else "moderate_storm"
-        d = row["days_to_major_signed"]
-        if abs(d) <= PEAK_HOLIDAY_WINDOW:                         return "peak_holiday"
-        if PEAK_HOLIDAY_WINDOW < abs(d) <= SHOULDER_WINDOW:
-            return "shoulder_pre" if d > 0 else "shoulder_post"
+        p, n = int(row["days_prior"]), int(row["days_next"])
+        if min(p, n) <= PEAK_HOLIDAY_WINDOW:                       return "peak_holiday"
+        if PEAK_HOLIDAY_WINDOW < p <= SHOULDER_POST_WINDOW:        return "shoulder_post"
+        if PEAK_HOLIDAY_WINDOW < n <= SHOULDER_PRE_WINDOW:         return "shoulder_pre"
         return "normal"
 
     oof["regime"] = oof.apply(classify, axis=1)

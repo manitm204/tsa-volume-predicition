@@ -1,0 +1,34 @@
+{
+  "regime": "NORMAL",
+  "model_order": [
+    "tab",
+    "ts3",
+    "yoy_delta",
+    "anchor"
+  ],
+  "weights_tuple": [
+    0.1878,
+    0.3114,
+    0.0,
+    0.5007
+  ],
+  "method": "50/50 blend of Direct-MAE full-history-to-date and last-30-NORMAL-day fits (yoy_delta excluded from fitting, pinned to 0 \u2014 see normal_weight_search.py)",
+  "generated_at": "2026-09-22T17:41:26.061698+00:00",
+  "n_full_history": 110,
+  "n_last30": 30,
+  "date_range": [
+    "2026-03-26",
+    "2026-09-21"
+  ],
+  "full_history_weights": [
+    0.3756,
+    0.3039,
+    0.3204
+  ],
+  "last30_weights": [
+    0.0,
+    0.3189,
+    0.6811
+  ],
+  "quick_tabular_oof_mae": 56620.9
+}

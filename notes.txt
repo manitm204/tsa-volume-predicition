@@ -1,0 +1,18 @@
+
+
+finally, I want to have a good tracking of my trades. I want to be able to see all past trades, and current trades, for both the weekly and daily markets.
+It should be able to referesh for the current trades, and see if there is a new trade. It should hold things, like if I won the trade, or lost, 
+and it could also do bins. So like if the average price is 15-30, how many times I win, if price is 90-100, how many times I win, etc. 
+Also it would be nice for all the postions to have the average price I bought at, so I could have 30 shares total, bought 15 at 30c, and 15 at 40c, 
+so it should show average share price of 35c. And then I want it to have what my models prediction was, so then it could show my edge, (this might
+only work for daily, because my weekly predictoins change every day, and the daily one, only happens once). And then with this we could also 
+bin based on edge percentage. Finally I also want when we run the kalshi function, for it to be stored somewhere, so we know what was aggresively bought,
+vs not. And then it can cross reference the active trades to see, if any limit orders were taken, and everthing. 
+
+
+The next step will be to turn this into a mini jarvis, so it will give me a complete update every morning. It will tell me how yesterday was, 
+like my prediction vs actual, how far off i was, did I make or lose money, was it a good trade, like i was 5k off, but I bought at 30c, so it was good
+edge. I want it go give an update about how the weekly changed, and then talk about today's market. Like what I'm predicting, what kalshi lines are,
+where I have a big edge, etc. I just want it to give me a full update about everything there is, what are my opon positions, how did they change, 
+are they looking better or worse, how about the regime, is it a normal day, or not, etc. This is why the tracking that we implemented before will be 
+good, because we know have this making a full summary. 

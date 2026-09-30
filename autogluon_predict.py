@@ -8,14 +8,14 @@ Uses the EXACT SAME feature pipeline for inference as training.
 
 Prediction pipeline:
   1. Tabular AutoGluon (autoregressive Monday chain for correct lag features)
-  2. TS3 + Prophet shadow models for each predicted day
+  2. TS3 shadow model + yoy_delta (deterministic) for each predicted day
   3. Per-regime ensemble weights  (ensemble_experiment/normal_weight_search.py)
   4. Weekly σ from ensemble OOF + per-regime Platt ratio  (platt_regime.py)
 
 Prerequisites:
     - Run autogluon_full.py first (trains model + generates OOF)
     - Run build_features.py first (generates master_features.csv)
-    - Run train_shadow_models.py first (Prophet + TS3 for ensemble routing)
+    - Run train_shadow_models.py first (TS3 for ensemble routing)
 
 Usage:
     python autogluon_predict.py
@@ -29,8 +29,6 @@ warnings.filterwarnings("ignore")
 
 import argparse
 import json
-import logging
-import pickle
 import sys
 from pathlib import Path
 import numpy as np
@@ -38,19 +36,17 @@ import pandas as pd
 from scipy import stats
 import shutil
 
-logging.getLogger("prophet").setLevel(logging.ERROR)
-logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
-
 from autogluon.tabular import TabularPredictor
 
 from build_features import (
     load_master, build_features_from_df,
     get_feature_columns, TARGET_COL,
     WEATHER_PATH as _WEATHER_PATH,
+    yoy_delta_trend_available_for_dates,
 )
 from production_router import (
     classify_regime, storm_alpha_for,
-    get_major_holiday_dates, days_to_nearest_major_signed,
+    get_major_holiday_dates, days_to_prior_and_next_major,
 )
 
 OUT_DIR = Path("./output_autogluon_predict")
@@ -67,28 +63,80 @@ FEATURE_IMPORTANCE_PATH = Path("./output_autogluon_best/feature_importance.csv")
 SHADOW_MODELS_DIR = Path("./output_router_shadow/models")
 ENSEMBLE_OOF_PATH = Path("./ensemble_experiment/output/combined_oof.csv")
 
-DEFAULT_THRESHOLDS = [2.45, 2.5, 2.55, 2.6, 2.65, 2.7]  # in millions
+DEFAULT_THRESHOLDS = [2.30, 2.35, 2.40, 2.45, 2.5, 2.55, 2.6, 2.65, 2.7, 2.75, 2.8]  # in millions
 TOP_N_DRIVERS = 5  # number of features to ablate for the dashboard explainability panel
 
-# Per-regime ensemble weights (tab, ts3, prophet, anchor)
-# Source: ensemble_experiment/normal_weight_search.py — Direct-MAE LOO
+# Per-regime ensemble weights (tab, ts3, yoy_delta, anchor)
+# Source: ensemble_experiment/normal_weight_search.py — LOO grid/NNLS.
 # STORM: None → production_router's smooth α-blend with weather_penalized_anchor
+# Re-fit 2026-09-22 after fixing a day-of-week misalignment bug in
+# recent_vol_vs_lag365_7d/14d, lag365_error_7d, and lag365_residual_anchor
+# (build_features.py) and retraining TS3 on the corrected covariates — ts3's
+# honest OOF error rose enough that it now gets zero weight in NORMAL and
+# SHOULDER_POST. Kept in sync with daily_predict.py's ENSEMBLE_WEIGHTS.
+#
+# NORMAL is split 2026-09-28 on build_features.yoy_delta_trend_available (see
+# production_router.py's docstring/NORMAL_YOY_*_WEIGHTS for the full writeup
+# and LOO evidence — these two tuples mirror that file exactly):
+#   UNAVAILABLE — D (or a delta_1 lookback anchor) is holiday-adjacent, so
+#   yoy_delta has degraded to a naive last-year lookup; == old NORMAL weights.
+#   AVAILABLE — trend-correction term carries real signal; yoy_delta earns
+#   real weight (LOO MAE -8.4% vs the old equal 4-way split on this bucket).
 ENSEMBLE_WEIGHTS = {
-    "NORMAL":       (0.491, 0.250, 0.022, 0.238),
-    "SHOULDER_PRE": (0.005, 0.103, 0.001, 0.891),
-    "SHOULDER_POST":(0.881, 0.072, 0.047, 0.000),
+    "NORMAL_YOY_UNAVAILABLE": (0.600, 0.000, 0.000, 0.400),
+    # Re-fit 2026-09-30 after rebuilding yoy_delta (5-week drop-variant,
+    # holiday-safe base — build_features.add_yoy_delta_feature). LOO weight
+    # search over the 4 models on all 225 normal OOF days puts the largest
+    # weight on the repaired yoy_delta. (tab, ts3, yoy_delta, anchor)
+    "NORMAL_YOY_AVAILABLE":   (0.350, 0.000, 0.450, 0.200),
+    "SHOULDER_PRE": (0.333, 0.333, 0.000, 0.333),
+    "SHOULDER_POST":(0.500, 0.000, 0.000, 0.500),
     "PEAK_HOLIDAY": (1.000, 0.000, 0.000, 0.000),
     "STORM":        None,
+    # Same as NORMAL_YOY_UNAVAILABLE for now (tagged for analysis, not yet re-tuned).
+    "STORM_ECHO":   (0.600, 0.000, 0.000, 0.400),
 }
+
+# NORMAL_YOY_UNAVAILABLE weights can be refreshed dynamically without a code
+# edit — see ensemble_experiment/refresh_normal_weights.py, which fits a
+# 50/50 blend of full-history-to-date and last-30-day weights and writes
+# this file. Retargeted 2026-09-28 from the old unsplit "NORMAL" key to
+# NORMAL_YOY_UNAVAILABLE (its 3-effective-model composition — tab/ts3/anchor,
+# yoy=0 — is the direct analog of what this refresh script was fitting
+# before the split). refresh_normal_weights.py itself hasn't been updated to
+# be yoy-availability-aware yet, so treat this path as still describing the
+# pre-split "NORMAL" population until it is.
+_DYNAMIC_NORMAL_WEIGHTS_PATH = Path("./ensemble_experiment/output/dynamic_normal_weights.json")
+if _DYNAMIC_NORMAL_WEIGHTS_PATH.exists():
+    try:
+        with open(_DYNAMIC_NORMAL_WEIGHTS_PATH) as _f:
+            _dyn = json.load(_f)
+        ENSEMBLE_WEIGHTS["NORMAL_YOY_UNAVAILABLE"] = tuple(_dyn["weights_tuple"])
+        print(f"[ensemble] Loaded dynamic NORMAL_YOY_UNAVAILABLE weights from "
+              f"{_DYNAMIC_NORMAL_WEIGHTS_PATH.name} (generated {_dyn.get('generated_at', '?')}): "
+              f"{ENSEMBLE_WEIGHTS['NORMAL_YOY_UNAVAILABLE']}")
+    except Exception as _e:
+        print(f"[ensemble] WARNING: failed to load dynamic NORMAL_YOY_UNAVAILABLE weights ({_e}); "
+              f"using hardcoded default")
+
+PREDICTION_HISTORY_PATH = OUT_DIR / "prediction_history.csv"
 
 # Platt ratio = σ_eff / σ_raw per regime (ensemble_experiment/platt_regime.py)
 # All regimes now have Platt shrinkage. STORM uses moderate_storm σ_eff.
+# Re-fit 2026-09-22 against the corrected anchor_master/TS3 OOF (see
+# ENSEMBLE_WEIGHTS comment above) — kept in sync with daily_predict.py's
+# REGIME_SIGMA. NORMAL_YOY_AVAILABLE/UNAVAILABLE both reuse the old NORMAL
+# ratio for now — sigma hasn't been re-tuned per bucket yet (same caveat as
+# STORM_ECHO below).
 PLATT_RATIO = {
-    "NORMAL":        41_617 / 76_004,   # ≈ 0.548
-    "SHOULDER_PRE":  32_246 / 56_245,   # ≈ 0.573
-    "SHOULDER_POST": 44_135 / 72_708,   # ≈ 0.607
-    "PEAK_HOLIDAY":  82_271 / 124_151,  # ≈ 0.663
+    "NORMAL_YOY_UNAVAILABLE": 37_058 / 67_302,   # ≈ 0.551
+    "NORMAL_YOY_AVAILABLE":   37_058 / 67_302,   # ≈ 0.551 — not yet re-tuned
+    "SHOULDER_PRE":  52_956 / 93_078,   # ≈ 0.569
+    "SHOULDER_POST": 45_824 / 82_353,   # ≈ 0.556
+    "PEAK_HOLIDAY":  70_017 / 123_198,  # ≈ 0.568
     "STORM":         57_780 / 85_228,   # ≈ 0.678
+    # Same as NORMAL_YOY_UNAVAILABLE for now (tagged for analysis, not yet re-tuned).
+    "STORM_ECHO":    37_058 / 67_302,   # ≈ 0.551
 }
 
 ITEM_ID = "tsa"
@@ -117,48 +165,48 @@ def load_eval_model():
 
 
 # ==========================================================================
-# Shadow model helpers (Prophet + TS3)
+# Shadow model helpers (TS3; yoy_delta needs no trained model — see
+# build_features.add_yoy_delta_feature / pred_yoy_delta column)
 # ==========================================================================
 def _load_shadow_models():
-    """Load Prophet + TS3. Returns (prophet_bundle, ts3, meta) or (None, None, None)."""
-    prophet_path      = SHADOW_MODELS_DIR / "prophet_p3.pkl"
+    """Load the TS3 shadow model. Returns (ts3, meta) or (None, None)."""
     ts3_path          = SHADOW_MODELS_DIR / "ts3_predictor"
     feature_cols_path = SHADOW_MODELS_DIR / "feature_cols.json"
 
-    if not all(p.exists() for p in [prophet_path, ts3_path, feature_cols_path]):
-        return None, None, None
+    if not all(p.exists() for p in [ts3_path, feature_cols_path]):
+        return None, None
 
     from autogluon.timeseries import TimeSeriesPredictor
-    with open(prophet_path, "rb") as f:
-        prophet_bundle = pickle.load(f)
     ts3  = TimeSeriesPredictor.load(str(ts3_path))
     with open(feature_cols_path) as f:
         meta = json.load(f)
-    return prophet_bundle, ts3, meta
+    return ts3, meta
 
 
-def _get_ts3_prophet_preds(target_date, feature_df, prophet_bundle, ts3, meta):
-    """Get TS3 and Prophet predictions for a single date."""
+def _get_ts3_pred(target_date, feature_df, ts3, meta, chained_preds=None):
+    """Get the TS3 prediction for a single date.
+
+    TS3 was trained with prediction_length=1, so it can only ever forecast the
+    single day right after its history ends. To reach days later in the week,
+    `chained_preds` (a {date: predicted_target} dict of TS3's own prior outputs
+    for this run) is used to fill the gap between the last real actual and
+    target_date, so each call is still a valid 1-step-ahead forecast — just
+    chained forward on its own predictions, autoregressively.
+    """
     from autogluon.timeseries import TimeSeriesDataFrame
 
     row = feature_df[feature_df["Date"] == target_date]
     if row.empty:
-        return None, None
-    row = row.iloc[0]
+        return None
 
-    # Prophet
-    prophet_model = prophet_bundle["model"]
-    prophet_regs  = prophet_bundle["regressors"]
-    future = pd.DataFrame({"ds": [target_date]})
-    for r in prophet_regs:
-        future[r] = [float(row[r]) if r in row.index and not pd.isna(row[r]) else 0.0]
-    prophet_pred = float(prophet_model.predict(future).iloc[0]["yhat"])
-
-    # TS3
     ts3_covs = [c for c in meta["ts3_covariates"] if c in feature_df.columns]
     history = feature_df[feature_df["Date"] < target_date][
         ["Date", TARGET_COL] + ts3_covs
-    ].dropna(subset=[TARGET_COL]).copy()
+    ].copy()
+    if chained_preds:
+        for dt, val in chained_preds.items():
+            history.loc[history["Date"] == dt, TARGET_COL] = val
+    history = history.dropna(subset=[TARGET_COL])
     history["item_id"] = ITEM_ID
     history = history.rename(columns={"Date": "timestamp", TARGET_COL: "target"})
     history_ts = TimeSeriesDataFrame.from_data_frame(
@@ -172,42 +220,50 @@ def _get_ts3_prophet_preds(target_date, feature_df, prophet_bundle, ts3, meta):
     )
     forecast = ts3.predict(history_ts, known_covariates=known_cov)
     col = "mean" if "mean" in forecast.columns else forecast.columns[0]
-    ts3_pred = float(forecast.iloc[0][col])
-
-    return ts3_pred, prophet_pred
+    return float(forecast.iloc[0][col])
 
 
-def _route_day(target_date, tabular_pred, ts3_pred, prophet_pred, feature_df):
+def _route_day(target_date, tabular_pred, ts3_pred, yoy_delta_pred, feature_df):
     """Apply regime classification + ensemble weights for one day.
     Returns (pred_ensemble, regime).
     """
     row = feature_df[feature_df["Date"] == target_date]
     if row.empty:
-        return tabular_pred, "NORMAL"
-    row = row.iloc[0]
+        storm_flag, impact_sq, storm_echo = 0, 0.0, 0
+        anchor_val = tabular_pred
+        weather_anch = tabular_pred
+        yoy_trend_available = 1
+    else:
+        row = row.iloc[0]
+        storm_flag   = int(row.get("storm_severe_flag", 0) or 0)
+        impact_sq    = float(row.get("storm_impact_sq", 0.0) or 0.0)
+        storm_echo   = int(row.get("storm_echo_flag", 0) or 0)
+        anchor_val   = float(row.get("anchor_master", tabular_pred) or tabular_pred)
+        weather_anch = float(row.get("weather_penalized_anchor", tabular_pred) or tabular_pred)
+        yoy_trend_available = int(row.get("yoy_delta_trend_available", 1) or 0)
 
-    storm_flag   = int(row.get("storm_severe_flag", 0) or 0)
-    impact_sq    = float(row.get("storm_impact_sq", 0.0) or 0.0)
-    anchor_val   = float(row.get("anchor_master", tabular_pred) or tabular_pred)
-    weather_anch = float(row.get("weather_penalized_anchor", tabular_pred) or tabular_pred)
-
-    holidays      = get_major_holiday_dates([target_date.year - 1, target_date.year, target_date.year + 1])
-    days_to_major = days_to_nearest_major_signed(target_date, holidays=holidays)
+    holidays = get_major_holiday_dates(
+        [target_date.year - 1, target_date.year, target_date.year + 1, target_date.year + 2]
+    )
+    days_prior, days_next = days_to_prior_and_next_major(target_date, holidays=holidays)
 
     regime = classify_regime(
         storm_severe_flag=storm_flag,
         storm_impact_sq=impact_sq,
-        days_to_major_signed=days_to_major,
+        days_to_prior_major=days_prior,
+        days_to_next_major=days_next,
+        storm_echo_flag=storm_echo,
+        yoy_delta_trend_available=yoy_trend_available,
     )
 
     if regime == "STORM":
         a = storm_alpha_for(impact_sq)
         pred_ensemble = a * tabular_pred + (1 - a) * weather_anch
     else:
-        wt, ws, wp, wa = ENSEMBLE_WEIGHTS[regime]
-        ts3_v    = ts3_pred    if ts3_pred    is not None else tabular_pred
-        prophet_v = prophet_pred if prophet_pred is not None else tabular_pred
-        pred_ensemble = wt * tabular_pred + ws * ts3_v + wp * prophet_v + wa * anchor_val
+        wt, ws, wy, wa = ENSEMBLE_WEIGHTS[regime]
+        ts3_v         = ts3_pred       if ts3_pred       is not None else tabular_pred
+        yoy_delta_v   = yoy_delta_pred if yoy_delta_pred is not None else tabular_pred
+        pred_ensemble = wt * tabular_pred + ws * ts3_v + wy * yoy_delta_v + wa * anchor_val
 
     return pred_ensemble, regime
 
@@ -229,19 +285,32 @@ def _estimate_from_ensemble_oof():
 
     years    = sorted(oof["Date"].dt.year.unique())
     holidays = get_major_holiday_dates(range(min(years) - 1, max(years) + 2))
-    oof["days_to_major_signed"] = oof["Date"].apply(
-        lambda d: days_to_nearest_major_signed(d, holidays)
+    prior_next = oof["Date"].apply(
+        lambda d: pd.Series(days_to_prior_and_next_major(d, holidays),
+                            index=["days_to_prior_major", "days_to_next_major"])
     )
+    oof[["days_to_prior_major", "days_to_next_major"]] = prior_next
+    # NOTE: oof's pred_yoy_delta column (from yoy_delta_oof.py/combine_oof.py)
+    # is the UNGUARDED formula — no holiday-contamination zeroing, unlike the
+    # live feature (build_features.add_yoy_delta_feature). yoy_delta_trend_
+    # available below is still computed from the real holiday-adjacency
+    # guard, so NORMAL_YOY_AVAILABLE rows here get weighted assuming a
+    # cleaner yoy_delta signal than what pred_yoy_delta actually contains.
+    # Sigma estimation only, not the live point prediction — flagged rather
+    # than fixed, since correcting it means regenerating combined_oof.csv.
+    oof["yoy_delta_trend_available"] = yoy_delta_trend_available_for_dates(oof["Date"])
     oof["regime"] = oof.apply(
         lambda r: classify_regime(
             storm_severe_flag=r["storm_severe_flag"],
             storm_impact_sq=r["storm_impact_sq"],
-            days_to_major_signed=r["days_to_major_signed"],
+            days_to_prior_major=int(r["days_to_prior_major"]),
+            days_to_next_major=int(r["days_to_next_major"]),
+            yoy_delta_trend_available=int(r["yoy_delta_trend_available"]),
         ), axis=1
     )
 
     # Apply ensemble weights per row (STORM → tabular fallback, no weather_anchor in OOF)
-    MODEL_COLS = ["pred_ag_tabular", "pred_ag_timeseries", "pred_prophet", "pred_anchor_master"]
+    MODEL_COLS = ["pred_ag_tabular", "pred_ag_timeseries", "pred_yoy_delta", "pred_anchor_master"]
     X = oof[MODEL_COLS].values.astype(float)
     oof["pred_ensemble"] = 0.0
     for regime, w in ENSEMBLE_WEIGHTS.items():
@@ -463,8 +532,8 @@ def get_current_week_info(tsa_df):
 # ==========================================================================
 def weekly_forecast(predictor, master_df, raw_tsa_df, weather_df,
                      weekly_total_std=None, alpha=0.65,
-                     prophet_bundle=None, ts3=None, meta=None):
-    shadow_available = prophet_bundle is not None
+                     ts3=None, meta=None):
+    shadow_available = ts3 is not None
     feature_cols = get_feature_columns(master_df)
     week_monday, week_sunday, week_dates, day_names, actual_days, predict_days = \
         get_current_week_info(raw_tsa_df)
@@ -476,10 +545,10 @@ def weekly_forecast(predictor, master_df, raw_tsa_df, weather_df,
     print(f"  Actual days:     {n_actual}")
     print(f"  Days to predict: {n_predict}")
 
-    # Build full (prune=False) feature_df for ts3/prophet — uses actual TSA history,
-    # no autoregressive injection needed for these models.
+    # Build full (prune=False) feature_df for ts3/yoy_delta — uses actual TSA
+    # history, no autoregressive injection needed for these models.
     feature_df_full = None
-    if shadow_available and n_predict > 0:
+    if n_predict > 0:
         try:
             merged = raw_tsa_df.copy().merge(weather_df, on="Date", how="left")
             existing_dates = set(pd.to_datetime(merged["Date"]).dt.date)
@@ -500,6 +569,8 @@ def weekly_forecast(predictor, master_df, raw_tsa_df, weather_df,
     predictions = {}
     for d, v in actual_days.items():
         predictions[d] = v
+
+    ts3_chain = {}  # {date: TS3's own prior prediction}, chained forward across the week
 
     daily_results = []
 
@@ -526,33 +597,68 @@ def weekly_forecast(predictor, master_df, raw_tsa_df, weather_df,
             pred         = predictor.predict(row_features)
             tabular_pred = float(pred.iloc[0]) if hasattr(pred, "iloc") else float(pred)
 
-            # 2. Ensemble routing (ts3 + prophet + per-regime weights)
-            regime      = "NORMAL"
-            pred_vol    = tabular_pred
-            ts3_pred    = None
-            prophet_pred = None
-            anchor_pred  = None
-            if shadow_available and feature_df_full is not None:
+            # 2a. Regime classification — depends only on date + storm flags +
+            #     the (deterministic, calendar-driven) yoy_delta_trend_available
+            #     flag, so always compute it independent of ts3/yoy_delta model
+            #     availability (whether the shadow model loaded, etc).
+            storm_flag, impact_sq, yoy_trend_available = 0, 0.0, 1
+            if feature_df_full is not None:
+                row = feature_df_full[feature_df_full["Date"] == ts]
+                if not row.empty:
+                    storm_flag = int(row.iloc[0].get("storm_severe_flag", 0) or 0)
+                    impact_sq  = float(row.iloc[0].get("storm_impact_sq", 0.0) or 0.0)
+                    yoy_trend_available = int(row.iloc[0].get("yoy_delta_trend_available", 1) or 0)
+            holidays = get_major_holiday_dates(
+                [ts.year - 1, ts.year, ts.year + 1, ts.year + 2]
+            )
+            days_prior, days_next = days_to_prior_and_next_major(ts, holidays=holidays)
+            regime = classify_regime(
+                storm_severe_flag=storm_flag,
+                storm_impact_sq=impact_sq,
+                days_to_prior_major=days_prior,
+                days_to_next_major=days_next,
+                yoy_delta_trend_available=yoy_trend_available,
+            )
+
+            # 2b. Ensemble blend (ts3 + yoy_delta + per-regime weights). yoy_delta
+            #     is deterministic (needs only feature_df_full); ts3 additionally
+            #     needs the shadow model. If either is unavailable, fall back to
+            #     tabular_pred for that component — but keep the correctly-
+            #     classified regime from 2a.
+            pred_vol       = tabular_pred
+            ts3_pred       = None
+            yoy_delta_pred = None
+            anchor_pred    = None
+            if feature_df_full is not None:
                 try:
-                    ts3_pred, prophet_pred = _get_ts3_prophet_preds(
-                        ts, feature_df_full, prophet_bundle, ts3, meta
-                    )
-                    pred_vol, regime = _route_day(ts, tabular_pred, ts3_pred, prophet_pred, feature_df_full)
                     row = feature_df_full[feature_df_full["Date"] == ts]
                     if not row.empty:
+                        yd = row.iloc[0].get("pred_yoy_delta", np.nan)
+                        yoy_delta_pred = float(yd) if pd.notna(yd) else None
                         anchor_pred = float(row.iloc[0].get("anchor_master", np.nan) or np.nan)
                         if np.isnan(anchor_pred):
                             anchor_pred = None
+                    if shadow_available:
+                        try:
+                            ts3_pred = _get_ts3_pred(ts, feature_df_full, ts3, meta,
+                                                      chained_preds=ts3_chain)
+                            if ts3_pred is not None:
+                                ts3_chain[ts] = ts3_pred
+                        except Exception:
+                            pass   # ts3 unavailable; _route_day handles None
+                    pred_vol, _regime_from_route = _route_day(
+                        ts, tabular_pred, ts3_pred, yoy_delta_pred, feature_df_full
+                    )
                 except Exception:
-                    pass   # keep tabular_pred and NORMAL regime
+                    pass   # keep tabular_pred; regime already set above
 
             predictions[ts] = pred_vol
 
-            print(f"\r  {day_name:>12} {ts.date()}  {'PREDICTED':>10}  {pred_vol:>12,.0f}  {regime:>12}")
+            print(f"\r  {day_name:>12} {ts.date()}  {'PREDICTED':>10}  {pred_vol:>12,.0f}  {regime:>22}")
             daily_results.append({
                 "Date": ts, "day_name": day_name, "status": "predicted",
                 "volume": pred_vol, "pred_tabular": tabular_pred, "regime": regime,
-                "pred_ts3": ts3_pred, "pred_prophet": prophet_pred, "pred_anchor": anchor_pred,
+                "pred_ts3": ts3_pred, "pred_yoy_delta": yoy_delta_pred, "pred_anchor": anchor_pred,
             })
 
     results_df = pd.DataFrame(daily_results)
@@ -715,15 +821,15 @@ def main():
     print("=" * 82)
     predictor = load_eval_model()
 
-    # ── Shadow models (Prophet + TS3) ─────────────────────────────────
+    # ── Shadow models (TS3) ────────────────────────────────────────────
     print(f"\n{'=' * 82}")
     print("Shadow Models (ensemble routing)")
     print("=" * 82)
-    prophet_bundle, ts3, meta = _load_shadow_models()
-    if prophet_bundle is not None:
-        print(f"  Loaded Prophet + TS3 from {SHADOW_MODELS_DIR}")
+    ts3, meta = _load_shadow_models()
+    if ts3 is not None:
+        print(f"  Loaded TS3 from {SHADOW_MODELS_DIR}")
     else:
-        print(f"  Shadow models not found — falling back to tabular-only routing.")
+        print(f"  Shadow model not found — falling back to tabular-only routing.")
         print(f"  Run train_shadow_models.py to enable full ensemble.")
 
     # ── Uncertainty ───────────────────────────────────────────────────
@@ -740,7 +846,7 @@ def main():
     results_df, weekly_avg, weekly_avg_std, n_actual, n_predict = \
         weekly_forecast(predictor, master_df, raw_tsa_df, weather_df,
                         weekly_total_std=weekly_total_std, alpha=alpha,
-                        prophet_bundle=prophet_bundle, ts3=ts3, meta=meta)
+                        ts3=ts3, meta=meta)
 
     # ── Platt-adjusted weekly σ ───────────────────────────────────────
     weekly_avg_std_platt = weekly_avg_std
@@ -815,7 +921,8 @@ def main():
         predicted_rows["run_date"] = run_date
         predicted_rows["weekly_avg_millions"] = weekly_avg / 1e6
         history_cols = ["run_date", "Date", "day_name", "predicted_volume",
-                        "weekly_avg_millions", "pred_tabular", "regime"]
+                        "weekly_avg_millions", "pred_tabular", "pred_ts3",
+                        "pred_yoy_delta", "pred_anchor", "regime"]
         history_cols = [c for c in history_cols if c in predicted_rows.columns]
         history_path = OUT_DIR / "prediction_history.csv"
         if history_path.exists():
@@ -856,6 +963,33 @@ def main():
         import db
         db.write_daily_forecasts(results_df)
         db.write_weekly_summary(summary.iloc[0].to_dict())
+
+        # Consolidated v2 — per-day daily predictions + weekly summary as
+        # one canonical predictions table.
+        pred_rows: list[dict] = []
+        for _, r in results_df.iterrows():
+            pred_rows.append({
+                "forecast_date":    r.get("Date") or r.get("date"),
+                "market_type":      "daily",
+                "day_name":         r.get("day_name"),
+                "status":           r.get("status"),
+                "regime":           r.get("regime"),
+                "predicted_volume": r.get("volume"),
+                "pred_tabular":     r.get("pred_tabular"),
+                "pred_ts3":         r.get("pred_ts3"),
+                "pred_yoy_delta":   r.get("pred_yoy_delta"),
+                "pred_anchor":      r.get("pred_anchor"),
+            })
+        s = summary.iloc[0].to_dict()
+        if s.get("week_sunday") is not None:
+            pred_rows.append({
+                "forecast_date":    s.get("week_sunday"),
+                "market_type":      "weekly",
+                "predicted_volume": s.get("weekly_avg"),
+                "sigma":            s.get("weekly_avg_std"),
+            })
+        if pred_rows:
+            db.write_predictions(pred_rows)
     except Exception as exc:
         print(f"[db] write failed (non-fatal): {exc}", file=sys.stderr)
 

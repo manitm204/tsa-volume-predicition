@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
@@ -42,8 +43,14 @@ const TrackerTT = ({ active, payload, label }: any) => {
 }
 
 export default function CurrentWeek() {
+  const [trackerWeek, setTrackerWeek] = useState<string | null>(null)
+
   const { data: week }       = useQuery({ queryKey: ["forecast-week"],      queryFn: api.forecastWeek      })
-  const { data: tracker }    = useQuery({ queryKey: ["weekly-avg-tracker"], queryFn: api.weeklyAvgTracker })
+  const { data: weekOptions = [] } = useQuery({ queryKey: ["forecast-weeks"], queryFn: api.forecastWeeks })
+  const { data: tracker }    = useQuery({
+    queryKey: ["weekly-avg-tracker", trackerWeek],
+    queryFn: () => api.weeklyAvgTracker(trackerWeek ?? undefined),
+  })
   const { data: positions }  = useQuery({ queryKey: ["positions"],          queryFn: api.positions,    refetchInterval: 60_000 })
   const { data: openOrders } = useQuery({ queryKey: ["open-orders"],        queryFn: api.openOrders,   refetchInterval: 60_000 })
   const { data: orderbook }  = useQuery({ queryKey: ["orderbook"],          queryFn: api.orderbook,    refetchInterval: 60_000 })
@@ -60,11 +67,16 @@ export default function CurrentWeek() {
     volume: d.volume ?? undefined,
     fill:   d.status === "actual" ? "#60a5fa" : "#f59e0b",
   }))
-  const trackerData = (tracker ?? []).map(t => ({
+  const trackerPoints = tracker?.points ?? []
+  const trackerData = trackerPoints.map(t => ({
     date:   format(parseISO(t.date), "MMM d"),
     Model:  t.model_avg_millions  ?? undefined,
     Kalshi: t.kalshi_avg_millions ?? undefined,
   }))
+  const settledAvg = tracker?.settled_avg_millions ?? null
+  const selectedWeek = tracker?.week_monday ?? null
+  const currentWeekMonday = weekOptions.find(w => w.is_current)?.week_monday ?? null
+  const isPastWeek = selectedWeek != null && currentWeekMonday != null && selectedWeek < currentWeekMonday
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -199,21 +211,45 @@ export default function CurrentWeek() {
       />
 
       {/* Tracker */}
-      {trackerData.length > 0 && (
-        <GlassSection
-          title="Weekly Avg Tracker"
-          sub="How model (emerald) and Kalshi (amber) consensus evolved this week"
-          right={
-            <div className="flex items-center gap-4 text-[11px] text-slate-500">
+      <GlassSection
+        title="Weekly Avg Tracker"
+        sub={
+          isPastWeek
+            ? "Past-week convergence — settled actual shown as dashed teal line"
+            : "How model (emerald) and Kalshi (amber) consensus evolved this week"
+        }
+        right={
+          <div className="flex items-center gap-3 text-[11px] text-slate-500">
+            <select
+              value={selectedWeek ?? ""}
+              onChange={e => setTrackerWeek(e.target.value || null)}
+              className="bg-slate-900/80 border border-slate-800/60 rounded px-2 py-1 text-[11px] text-slate-200 mono"
+            >
+              {weekOptions.map(w => (
+                <option key={w.week_monday} value={w.week_monday}>
+                  {format(parseISO(w.week_monday), "MMM d, yyyy")}
+                  {w.is_current ? " (current)" : ""}
+                  {w.settled_avg_millions != null ? ` — settled ${w.settled_avg_millions.toFixed(3)}M` : ""}
+                </option>
+              ))}
+            </select>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-[2.5px] bg-edge-up rounded" /> Model
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-[0px]" style={{ borderTop: "2px dashed #f59e0b" }} /> Kalshi
+            </span>
+            {settledAvg != null && (
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-[2.5px] bg-edge-up rounded" /> Model
+                <span className="inline-block w-3 h-[0px]" style={{ borderTop: "2px dashed #22d3a4" }} /> Settled
               </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-[0px]" style={{ borderTop: "2px dashed #f59e0b" }} /> Kalshi
-              </span>
-            </div>
-          }
-        >
+            )}
+          </div>
+        }
+      >
+        {trackerData.length === 0 ? (
+          <p className="text-[13px] text-slate-500">No tracker data for this week.</p>
+        ) : (
           <div className="h-[180px] sm:h-[220px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={trackerData} margin={{ top: 6, right: 14, bottom: 0, left: 0 }}>
@@ -221,13 +257,22 @@ export default function CurrentWeek() {
               <XAxis dataKey="date" tick={{ fill: "#475569", fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fill: "#475569", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={v => `${v.toFixed(2)}M`} width={52} domain={["auto","auto"]} />
               <Tooltip content={<TrackerTT />} cursor={{ stroke: "rgba(96,165,250,0.20)" }} />
+              {settledAvg != null && (
+                <ReferenceLine
+                  y={settledAvg}
+                  stroke="#22d3a4"
+                  strokeDasharray="5 3"
+                  strokeWidth={1.5}
+                  label={{ value: `settled ${settledAvg.toFixed(3)}M`, fill: "#22d3a4", fontSize: 10, position: "insideTopLeft" }}
+                />
+              )}
               <Line type="monotone" dataKey="Model"  stroke="#22d3a4" strokeWidth={2.5} dot={{ r: 4, fill: "#22d3a4", strokeWidth: 0 }} connectNulls={false} />
               <Line type="monotone" dataKey="Kalshi" stroke="#f59e0b" strokeWidth={2}   strokeDasharray="5 3" dot={{ r: 4, fill: "#f59e0b", strokeWidth: 0 }} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
           </div>
-        </GlassSection>
-      )}
+        )}
+      </GlassSection>
     </div>
   )
 }

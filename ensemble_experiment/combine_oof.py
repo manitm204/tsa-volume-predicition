@@ -1,19 +1,20 @@
 """
 combine_oof.py
 ==============
-Merge the four OOF CSVs produced by the other scripts in this folder into
+Merge the OOF CSVs produced by the other scripts in this folder into
 one combined CSV and print a comparison table (per-model MAE, residual
 correlations).
 
 Inputs (under ensemble_experiment/output/):
     ag_tabular_oof.csv         pred_ag_tabular
     ag_timeseries_oof.csv      pred_ag_timeseries
-    prophet_oof.csv            pred_prophet
     anchor_master_oof.csv      pred_anchor_master
+    seasonal_naive_oof.csv     pred_seasonal_naive
+    yoy_delta_oof.csv          pred_yoy_delta  (replaces prophet in production)
 
 Output:
     combined_oof.csv           Date, Volume, pred_ag_tabular, pred_ag_timeseries,
-                               pred_prophet, pred_anchor_master
+                               pred_anchor_master, pred_seasonal_naive, pred_yoy_delta
     combined_summary.json      per-model MAE + residual correlation matrix
 """
 
@@ -34,8 +35,9 @@ OUT_DIR = HERE / "output"
 INPUTS = [
     ("ag_tabular_oof.csv", "pred_ag_tabular"),
     ("ag_timeseries_oof.csv", "pred_ag_timeseries"),
-    ("prophet_oof.csv", "pred_prophet"),
     ("anchor_master_oof.csv", "pred_anchor_master"),
+    ("seasonal_naive_oof.csv", "pred_seasonal_naive"),
+    ("yoy_delta_oof.csv", "pred_yoy_delta"),
 ]
 
 

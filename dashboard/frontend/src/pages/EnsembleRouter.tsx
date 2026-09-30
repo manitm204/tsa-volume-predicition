@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { GlassSection } from "../components/ui/GlassCard";
-import type { EnsembleWeightRow, EnsembleHistoryRow, EnsembleSummary } from "../types";
+import type { EnsembleWeightRow } from "../types";
 
 // ── Regime colours + labels ───────────────────────────────────────────────────
 const REGIME_COLOR: Record<string, string> = {
@@ -23,10 +23,10 @@ const REGIME_LABEL: Record<string, string> = {
 
 // ── Model segment colours for the stacked weight bar ─────────────────────────
 const MODEL_COLOR = {
-  tab:     "#60a5fa",
-  ts3:     "#22d3a4",
-  prophet: "#f59e0b",
-  anchor:  "#a78bfa",
+  tab:       "#60a5fa",
+  ts3:       "#22d3a4",
+  yoy_delta: "#f59e0b",
+  anchor:    "#a78bfa",
 };
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -65,10 +65,10 @@ function WeightBar({ row }: { row: EnsembleWeightRow }) {
     return <span className="text-[10px] text-slate-500 italic">α-blend</span>;
   }
   const segments: { key: keyof typeof MODEL_COLOR; val: number }[] = [
-    { key: "tab",     val: row.tab     ?? 0 },
-    { key: "ts3",     val: row.ts3     ?? 0 },
-    { key: "prophet", val: row.prophet ?? 0 },
-    { key: "anchor",  val: row.anchor  ?? 0 },
+    { key: "tab",       val: row.tab       ?? 0 },
+    { key: "ts3",       val: row.ts3       ?? 0 },
+    { key: "yoy_delta", val: row.yoy_delta ?? 0 },
+    { key: "anchor",    val: row.anchor    ?? 0 },
   ];
   return (
     <div className="flex h-3 w-28 rounded overflow-hidden gap-px">
@@ -99,18 +99,6 @@ export default function EnsembleRouter() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: history = [], isLoading: histLoading } = useQuery({
-    queryKey: ["ensemble-history"],
-    queryFn: api.ensembleHistory,
-    refetchInterval: 60_000,
-  });
-
-  const { data: summary } = useQuery<EnsembleSummary>({
-    queryKey: ["ensemble-summary"],
-    queryFn: api.ensembleSummary,
-    refetchInterval: 60_000,
-  });
-
   // ── KPI derivations ─────────────────────────────────────────────────────────
   const days = weekData?.days ?? [];
 
@@ -131,7 +119,7 @@ export default function EnsembleRouter() {
     <div className="space-y-5 animate-fade-in">
       <PageHeader
         title="Ensemble Router"
-        description="Per-regime ensemble of 4 models (tabular, TS3, prophet, anchor_master) with Platt-calibrated σ for probabilities."
+        description="Per-regime ensemble of 4 models (tabular, TS3, yoy_delta, anchor_master) with Platt-calibrated σ for probabilities."
         kpis={[
           {
             label: "Predicted Days",
@@ -147,14 +135,9 @@ export default function EnsembleRouter() {
           },
           {
             label: "Platt σ Range",
-            value: "32k – 82k",
+            value: "28k – 68k",
             sub: "σ_eff across all regimes",
             accent: "#a78bfa",
-          },
-          {
-            label: "History Rows",
-            value: summary?.n_predictions != null ? String(summary.n_predictions) : "—",
-            sub: summary?.last_target_date ? `last: ${summary.last_target_date}` : "prediction_history.csv",
           },
         ]}
       />
@@ -170,7 +153,7 @@ export default function EnsembleRouter() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-left text-slate-500 border-b border-slate-800/60">
-                {["Day", "Date", "Status", "Regime", "Tab%", "TS3%", "Prophet%", "Anchor%", "σ_eff", "Volume"].map(h => (
+                {["Day", "Date", "Status", "Regime", "Tab%", "TS3%", "YoY Δ%", "Anchor%", "σ_eff", "Volume"].map(h => (
                   <th key={h} className="py-2 pr-3 font-semibold">{h}</th>
                 ))}
               </tr>
@@ -199,7 +182,7 @@ export default function EnsembleRouter() {
                       {isActual || !d.weights ? "—" : fmtPct(d.weights.ts3)}
                     </td>
                     <td className="py-2 pr-3 mono text-slate-400">
-                      {isActual || !d.weights ? "—" : fmtPct(d.weights.prophet)}
+                      {isActual || !d.weights ? "—" : fmtPct(d.weights.yoy_delta)}
                     </td>
                     <td className="py-2 pr-3 mono text-slate-400">
                       {isActual || !d.weights ? "—" : fmtPct(d.weights.anchor)}
@@ -229,10 +212,10 @@ export default function EnsembleRouter() {
           <>
             {/* Legend */}
             <div className="flex gap-4 mb-3 text-[11px] text-slate-500">
-              {(["tab", "ts3", "prophet", "anchor"] as const).map(k => (
+              {(["tab", "ts3", "yoy_delta", "anchor"] as const).map(k => (
                 <span key={k} className="flex items-center gap-1.5">
                   <span className="inline-block w-3 h-2.5 rounded-sm" style={{ background: MODEL_COLOR[k] }} />
-                  {k === "tab" ? "Tabular" : k === "ts3" ? "TS3" : k === "prophet" ? "Prophet" : "Anchor"}
+                  {k === "tab" ? "Tabular" : k === "ts3" ? "TS3" : k === "yoy_delta" ? "YoY Delta" : "Anchor"}
                 </span>
               ))}
             </div>
@@ -240,7 +223,7 @@ export default function EnsembleRouter() {
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-800/60">
-                  {["Regime", "Tabular", "TS3", "Prophet", "Anchor", "σ_raw", "σ_eff", "Weight Split", "Note"].map(h => (
+                  {["Regime", "Tabular", "TS3", "YoY Delta", "Anchor", "σ_raw", "σ_eff", "Weight Split", "Note"].map(h => (
                     <th key={h} className="py-2 pr-3 font-semibold">{h}</th>
                   ))}
                 </tr>
@@ -253,7 +236,7 @@ export default function EnsembleRouter() {
                     </td>
                     <td className="py-2.5 pr-3 mono text-slate-300">{fmtPct(row.tab)}</td>
                     <td className="py-2.5 pr-3 mono text-slate-300">{fmtPct(row.ts3)}</td>
-                    <td className="py-2.5 pr-3 mono text-slate-300">{fmtPct(row.prophet)}</td>
+                    <td className="py-2.5 pr-3 mono text-slate-300">{fmtPct(row.yoy_delta)}</td>
                     <td className="py-2.5 pr-3 mono text-slate-300">{fmtPct(row.anchor)}</td>
                     <td className="py-2.5 pr-3 mono text-slate-500">{fmtK(row.sigma_raw)}</td>
                     <td className="py-2.5 pr-3 mono text-slate-200 font-semibold">{fmtK(row.sigma_eff)}</td>
@@ -269,63 +252,6 @@ export default function EnsembleRouter() {
         )}
       </GlassSection>
 
-      {/* ── Section 3: Prediction History ──────────────────────────────────── */}
-      <GlassSection
-        title="Prediction History"
-        sub="Most recent 30 rows from prediction_history.csv — one row per day per run"
-      >
-        {histLoading ? (
-          <p className="text-[13px] text-slate-500">Loading…</p>
-        ) : (history as EnsembleHistoryRow[]).length === 0 ? (
-          <p className="text-[13px] text-slate-500">
-            No prediction history yet. Runs via <code className="mono text-slate-400">autogluon_predict.py</code> will
-            populate <code className="mono text-slate-400">output_autogluon_predict/prediction_history.csv</code>.
-          </p>
-        ) : (
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="text-left text-slate-500 border-b border-slate-800/60">
-                {["Date", "Made On", "Regime", "Ensemble Pred", "Tabular Pred", "Δ (ens − tab)"].map(h => (
-                  <th key={h} className="py-2 pr-3 font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(history as EnsembleHistoryRow[]).map((row, i) => {
-                const delta =
-                  row.predicted_volume != null && row.pred_tabular != null
-                    ? row.predicted_volume - row.pred_tabular
-                    : null;
-                const deltaK = delta != null ? Math.round(delta / 1000) : null;
-                return (
-                  <tr key={`${row.target_date}-${i}`} className="border-b border-slate-800/30">
-                    <td className="py-2 pr-3 mono text-slate-300">{row.target_date}</td>
-                    <td className="py-2 pr-3 mono text-slate-500 text-[11px]">{row.made_on_date ?? "—"}</td>
-                    <td className="py-2 pr-3">
-                      <RegimeBadge regime={row.regime} />
-                    </td>
-                    <td className="py-2 pr-3 mono text-slate-100 font-semibold">
-                      {fmtVol(row.predicted_volume)}
-                    </td>
-                    <td className="py-2 pr-3 mono text-slate-400">
-                      {fmtVol(row.pred_tabular)}
-                    </td>
-                    <td className="py-2 mono font-semibold">
-                      {deltaK != null ? (
-                        <span style={{ color: deltaK >= 0 ? "#22d3a4" : "#ef5466" }}>
-                          {deltaK >= 0 ? "+" : ""}{deltaK}k
-                        </span>
-                      ) : (
-                        <span className="text-slate-700">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </GlassSection>
     </div>
   );
 }

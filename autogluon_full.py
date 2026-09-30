@@ -24,7 +24,9 @@ Outputs to output_autogluon_best/
 import warnings
 warnings.filterwarnings("ignore")
 
+import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -41,16 +43,19 @@ from build_features import (
     TARGET_COL, RANDOM_STATE,
 )
 
-OUT_DIR = Path("./output_autogluon_best_google_trends")
+OUT_DIR = Path("./output_autogluon_best")
 OUT_DIR.mkdir(exist_ok=True)
 
 FINAL_MODEL_DIR = OUT_DIR / "ag_final"
+# Training cutoff metadata — read by train_models.py's update_tabular_oof()
+# so it never treats a date the model has already seen in training as OOF.
+TRAINED_THROUGH_PATH = OUT_DIR / "ag_final_trained_through.json"
 
 N_CV_SPLITS = 4
 CV_TEST_SIZE = 91
 CV_GAP = 0
-TIME_LIMIT_CV = 15 * 60       # seconds per fold
-TIME_LIMIT_FINAL = 30 * 60   # seconds for final model
+TIME_LIMIT_CV = 10 * 60      # seconds per fold
+TIME_LIMIT_FINAL = 15 * 60  # seconds for final model
 AG_PRESET = "best_quality"
 AG_VERBOSITY = 1
 
@@ -186,6 +191,17 @@ def main():
     print("Training Final Model on ALL Data")
     print("=" * 80)
     predictor = train_final(df)
+
+    # Record the training cutoff so downstream OOF backfills (train_models.py)
+    # never claim a date this model has already seen in training as honest OOF.
+    trained_through = str(df["Date"].max().date())
+    with open(TRAINED_THROUGH_PATH, "w") as f:
+        json.dump({
+            "trained_through_date": trained_through,
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "n_rows": int(len(df)),
+        }, f, indent=2)
+    print(f"\nTraining cutoff → {TRAINED_THROUGH_PATH}  (trained_through_date={trained_through})")
 
     # ── Feature importance ────────────────────────────────────────────
     try:

@@ -1,34 +1,31 @@
 """
 train_models.py
 ===============
-Train and maintain the three prediction models and update rolling OOF
+Train and maintain the prediction models and update rolling OOF
 predictions used for Platt / isotonic calibration.
 
 Schedule:
-  prophet      daily (fast, ~30s)         --max-age-prophet  (default 1)
   timeseries   weekly (slow, ~30 min)     --max-age-ts       (default 6)
   OOF update   weekly                     --max-age-oof      (default 6)
 
 Model specs match ensemble_experiment/ exactly:
-  Prophet   basic (yearly + weekly seasonality, no regressors, no holidays)
-            matching ensemble_experiment/prophet_oof.py
-  TS3       TS3_COVARIATES (calendar + holiday + lag365 family)
-            matching ensemble_experiment/ag_timeseries.py
-  Tabular   managed by autogluon_full.py, NOT retrained here
+  TS3        TS3_COVARIATES (calendar + holiday + lag365 family)
+             matching ensemble_experiment/ag_timeseries.py
+  Tabular    managed by autogluon_full.py, NOT retrained here
+  yoy_delta  deterministic formula (build_features.add_yoy_delta_feature),
+             no training needed — replaces Prophet in the production ensemble
 
 OOF strategy for new dates:
-  Prophet  — weekly holdout: fit fresh model on data-before-week, predict week
-             (cheap & honest — prophet fits in <5s)
-  TS3      — use current production TS3 to predict new dates day-by-day
-  Tabular  — use current production tabular to predict new dates
-  Anchor   — extract anchor_master feature directly (no model needed)
+  TS3        — use current production TS3 to predict new dates day-by-day
+  Tabular    — use current production tabular to predict new dates
+  Anchor     — extract anchor_master feature directly (no model needed)
+  yoy_delta  — extract pred_yoy_delta feature directly (no model needed)
 
 All OOF files live in ensemble_experiment/output/ so calibration scripts
 (platt_regime.py etc.) keep reading from the same location.
 
 Usage:
     python train_models.py                      # respect staleness thresholds
-    python train_models.py --prophet            # force prophet retrain only
     python train_models.py --ts                 # force timeseries retrain only
     python train_models.py --update-oof         # force OOF update only
     python train_models.py --all                # force retrain + OOF update
@@ -38,9 +35,7 @@ Usage:
 
 import argparse
 import json
-import logging
 import os
-import pickle
 import shutil
 import sys
 import tempfile
@@ -55,12 +50,6 @@ from sklearn.metrics import mean_absolute_error
 warnings.filterwarnings("ignore")
 
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
-from prophet import Prophet
-
-# Set after imports — Prophet's __init__ resets cmdstanpy's log level on import
-logging.getLogger("prophet").setLevel(logging.ERROR)
-logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
-logging.getLogger("stan").setLevel(logging.ERROR)
 
 from build_features import (
     TARGET_COL, KEEP_FEATURES,
@@ -73,19 +62,17 @@ OOF_DIR    = Path("./ensemble_experiment/output")
 TABULAR_MODEL_DIR = Path("./output_autogluon_best/ag_final")
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-PROPHET_PATH      = MODELS_DIR / "prophet_p3.pkl"      # kept for compat with daily_predict
 TS3_PATH          = MODELS_DIR / "ts3_predictor"
 FEATURE_COLS_PATH = MODELS_DIR / "feature_cols.json"
 
-PROPHET_TRAINED_AT = MODELS_DIR / "prophet_trained_at.json"
 TS_TRAINED_AT      = MODELS_DIR / "ts_trained_at.json"
 OOF_UPDATED_AT     = MODELS_DIR / "oof_updated_at.json"
 
-OOF_TABULAR  = OOF_DIR / "ag_tabular_oof.csv"
-OOF_TS       = OOF_DIR / "ag_timeseries_oof.csv"
-OOF_PROPHET  = OOF_DIR / "prophet_oof.csv"
-OOF_ANCHOR   = OOF_DIR / "anchor_master_oof.csv"
-OOF_COMBINED = OOF_DIR / "combined_oof.csv"
+OOF_TABULAR   = OOF_DIR / "ag_tabular_oof.csv"
+OOF_TS        = OOF_DIR / "ag_timeseries_oof.csv"
+OOF_ANCHOR    = OOF_DIR / "anchor_master_oof.csv"
+OOF_YOY_DELTA = OOF_DIR / "yoy_delta_oof.csv"
+OOF_COMBINED  = OOF_DIR / "combined_oof.csv"
 
 ITEM_ID = "tsa"
 
@@ -105,15 +92,6 @@ TS3_COVARIATES = [
 
 DEFAULT_TS_TIME_LIMIT = 1800
 DEFAULT_TS_PRESET     = "best_quality"
-
-# ── Prophet regressors (must match ensemble_experiment/prophet_regressors_oof.py) ──
-PROPHET_REGRESSORS = [
-    "lag365_same_dow_5w_mean",
-    "yoy_ratio_7d",
-    "vol_wtd_storm_impact",
-    "holiday_decay_shape",
-    "days_to_holiday_signed",
-]
 
 
 # ── Staleness helpers ─────────────────────────────────────────────────────────
@@ -165,32 +143,6 @@ def to_ts_df(df, covariate_cols):
     )
 
 
-# ── Prophet training ──────────────────────────────────────────────────────────
-def _fit_prophet_with_regressors(train_df: pd.DataFrame) -> Prophet:
-    """Prophet with PROPHET_REGRESSORS — matching prophet_regressors_oof.py."""
-    available = [r for r in PROPHET_REGRESSORS if r in train_df.columns]
-    ds_df = train_df.rename(columns={"Date": "ds", TARGET_COL: "y"}).copy()
-    for r in available:
-        ds_df[r] = ds_df[r].fillna(0.0)
-    m = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
-    for r in available:
-        m.add_regressor(r)
-    m.fit(ds_df[["ds", "y"] + available])
-    return m, available
-
-
-def train_prophet(df: pd.DataFrame, force=False, max_age=1):
-    print("\n[ Prophet ]")
-    if not _needs_update(PROPHET_TRAINED_AT, max_age, force):
-        return
-    m, regressors_used = _fit_prophet_with_regressors(df)
-    with open(PROPHET_PATH, "wb") as f:
-        pickle.dump({"model": m, "regressors": regressors_used}, f)
-    _mark_trained(PROPHET_TRAINED_AT, {"n_rows": len(df), "latest_date": str(df["Date"].max().date()),
-                                        "regressors": regressors_used})
-    print(f"  saved → {PROPHET_PATH}  ({len(df)} rows, regressors={regressors_used})")
-
-
 # ── TS3 training ──────────────────────────────────────────────────────────────
 def train_timeseries(df: pd.DataFrame, time_limit: int, preset: str, force=False, max_age=6):
     print("\n[ TimeSeries (TS3) ]")
@@ -214,7 +166,7 @@ def train_timeseries(df: pd.DataFrame, time_limit: int, preset: str, force=False
 
     # Save feature_cols.json (read by daily_predict + autogluon_predict)
     with open(FEATURE_COLS_PATH, "w") as f:
-        json.dump({"prophet_regressors": [], "ts3_covariates": available,
+        json.dump({"ts3_covariates": available,
                    "target_col": TARGET_COL, "item_id": ITEM_ID}, f, indent=2)
 
 
@@ -225,76 +177,6 @@ def _new_oof_dates(oof_path: Path, full_df: pd.DataFrame) -> pd.DataFrame:
         return full_df
     existing = set(pd.read_csv(oof_path, parse_dates=["Date"])["Date"].dt.date)
     return full_df[~full_df["Date"].dt.date.isin(existing)].reset_index(drop=True)
-
-
-def _week_batches(df: pd.DataFrame):
-    """Split df into consecutive 7-day batches by date order."""
-    if df.empty:
-        return []
-    dates = df.sort_values("Date")["Date"].tolist()
-    batches = []
-    for i in range(0, len(dates), 7):
-        chunk = dates[i:i + 7]
-        batches.append((chunk[0], chunk[-1]))
-    return batches
-
-
-# ── Prophet OOF ───────────────────────────────────────────────────────────────
-def update_prophet_oof(full_df: pd.DataFrame):
-    """
-    Weekly holdout: for each new week, fit regressor Prophet on data-before-week
-    and predict. Matches prophet_regressors_oof.py spec exactly.
-    """
-    # Re-suppress after Prophet's import side-effects reset these levels
-    logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
-    logging.getLogger("prophet").setLevel(logging.ERROR)
-
-    new_df = _new_oof_dates(OOF_PROPHET, full_df[["Date", TARGET_COL]])
-    if new_df.empty:
-        print("  prophet OOF: up to date")
-        return
-
-    available_regs = [r for r in PROPHET_REGRESSORS if r in full_df.columns]
-    batches = _week_batches(new_df)
-    print(f"  prophet OOF: extending by {len(new_df)} dates across {len(batches)} week(s)")
-    new_rows = []
-    for start, end in batches:
-        train_raw = full_df[full_df["Date"] < start].copy()
-        if len(train_raw) < 30:
-            print(f"    skipping {start.date()} — insufficient history ({len(train_raw)} rows)")
-            continue
-
-        for r in available_regs:
-            train_raw[r] = train_raw[r].fillna(0.0)
-        ds_train = train_raw.rename(columns={"Date": "ds", TARGET_COL: "y"})
-
-        m = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
-        for r in available_regs:
-            m.add_regressor(r)
-        m.fit(ds_train[["ds", "y"] + available_regs])
-
-        pred_raw = full_df[(full_df["Date"] >= start) & (full_df["Date"] <= end)].copy()
-        for r in available_regs:
-            pred_raw[r] = pred_raw[r].fillna(0.0)
-        future = pred_raw.rename(columns={"Date": "ds"})
-        fc = m.predict(future[["ds"] + available_regs])
-
-        for _, row in fc.iterrows():
-            actual_row = full_df[full_df["Date"] == row["ds"]]
-            if actual_row.empty or actual_row[TARGET_COL].isna().all():
-                continue
-            new_rows.append({
-                "Date":         row["ds"],
-                "Volume":       float(actual_row[TARGET_COL].values[0]),
-                "pred_prophet": float(row["yhat"]),
-            })
-        print(f"    {start.date()} → {end.date()}  ({len([r for r in new_rows if start <= r['Date'] <= end])} rows)")
-
-    if new_rows:
-        base = pd.read_csv(OOF_PROPHET, parse_dates=["Date"]) if OOF_PROPHET.exists() else pd.DataFrame()
-        extended = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True).sort_values("Date")
-        extended.to_csv(OOF_PROPHET, index=False)
-        print(f"  prophet OOF → {OOF_PROPHET}  ({len(extended)} total rows)")
 
 
 # ── TS3 OOF ───────────────────────────────────────────────────────────────────
@@ -311,7 +193,12 @@ _TS3_MIN_HISTORY     = 365   # skip dates with fewer prior rows (too short for r
 def update_ts_oof(full_df: pd.DataFrame):
     """
     Use current production TS3 model to predict new dates day-by-day.
-    Honest if the production model predates those dates.
+
+    Only backfills dates strictly after TS_TRAINED_AT's recorded training
+    cutoff (latest_date) — otherwise the model may have already seen that
+    date during training, and predicting it would be in-sample, not honest
+    OOF. (This bit us: dates were previously backfilled with no cutoff
+    check, silently mixing in leaked/in-sample predictions.)
 
     Caps at _TS3_MAX_NEW_PER_RUN per call and requires >= _TS3_MIN_HISTORY prior
     rows so early-data edge cases don't trigger noisy SeasonalNaive fallbacks.
@@ -321,9 +208,16 @@ def update_ts_oof(full_df: pd.DataFrame):
         print("  TS3 OOF: production model not found — run --ts first")
         return
 
+    if not TS_TRAINED_AT.exists():
+        print("  ts3 OOF: no training-cutoff record (TS_TRAINED_AT) — skipping "
+              "backfill until --ts has been run at least once.")
+        return
+    cutoff = pd.Timestamp(json.loads(TS_TRAINED_AT.read_text())["latest_date"])
+
     new_df = _new_oof_dates(OOF_TS, full_df)
+    new_df = new_df[new_df["Date"] > cutoff]
     if new_df.empty:
-        print("  ts3 OOF: up to date")
+        print(f"  ts3 OOF: up to date (nothing newer than training cutoff {cutoff.date()})")
         return
 
     new_df = new_df.sort_values("Date").reset_index(drop=True)
@@ -341,7 +235,7 @@ def update_ts_oof(full_df: pd.DataFrame):
     available = [c for c in TS3_COVARIATES if c in full_df.columns]
     # Resolve to absolute path before any chdir
     ts3_abs = str(TS3_PATH.resolve())
-    predictor = TimeSeriesPredictor.load(ts3_abs, verbosity=0)
+    predictor = TimeSeriesPredictor.load(ts3_abs)
     new_rows = []
 
     # Run predictions from a temp dir so AutoGluon's fallback model dirs
@@ -401,19 +295,32 @@ def update_ts_oof(full_df: pd.DataFrame):
 def update_tabular_oof(full_df: pd.DataFrame):
     """
     Use current production tabular model to predict new dates.
-    Honest if the production model (autogluon_full.py) predates those dates.
+
+    Only backfills dates strictly after ag_final_trained_through.json's
+    recorded training cutoff — otherwise the model may have already seen
+    that date during training, and predicting it would be in-sample, not
+    honest OOF. (This bit us: ~78% of ag_tabular_oof.csv was previously
+    leaked this way — see autogluon_full.py's TRAINED_THROUGH_PATH.)
     """
     if not TABULAR_MODEL_DIR.exists():
         print("  tabular OOF: production model not found — run autogluon_full.py first")
         return
+
+    trained_through_path = TABULAR_MODEL_DIR.parent / "ag_final_trained_through.json"
+    if not trained_through_path.exists():
+        print("  tabular OOF: no training-cutoff record (ag_final_trained_through.json) — "
+              "skipping backfill until autogluon_full.py has been rerun with the cutoff fix.")
+        return
+    cutoff = pd.Timestamp(json.loads(trained_through_path.read_text())["trained_through_date"])
 
     pruned_df = build_features_from_df(load_and_merge_data(), verbose=False, prune=True)
     pruned_df["Date"] = pd.to_datetime(pruned_df["Date"])
     pruned_df = pruned_df[pruned_df[TARGET_COL].notna()].copy()
 
     new_df = _new_oof_dates(OOF_TABULAR, pruned_df)
+    new_df = new_df[new_df["Date"] > cutoff]
     if new_df.empty:
-        print("  tabular OOF: up to date")
+        print(f"  tabular OOF: up to date (nothing newer than training cutoff {cutoff.date()})")
         return
 
     from autogluon.tabular import TabularPredictor
@@ -458,14 +365,36 @@ def update_anchor_oof(full_df: pd.DataFrame):
     print(f"  anchor OOF → {OOF_ANCHOR}  ({len(extended)} total rows, {len(new_rows)} new)")
 
 
+# ── yoy_delta OOF ─────────────────────────────────────────────────────────────
+def update_yoy_delta_oof(full_df: pd.DataFrame):
+    """Extract pred_yoy_delta feature for any dates not yet in the OOF file."""
+    if "pred_yoy_delta" not in full_df.columns:
+        print("  yoy_delta OOF: pred_yoy_delta column not found in features — check pipeline")
+        return
+
+    sub = full_df[["Date", TARGET_COL, "pred_yoy_delta"]].rename(
+        columns={TARGET_COL: "Volume"}
+    )
+    new_df = _new_oof_dates(OOF_YOY_DELTA, sub)
+    if new_df.empty:
+        print("  yoy_delta OOF: up to date")
+        return
+
+    new_rows = sub[sub["Date"].isin(new_df["Date"])].copy()
+    base = pd.read_csv(OOF_YOY_DELTA, parse_dates=["Date"]) if OOF_YOY_DELTA.exists() else pd.DataFrame()
+    extended = pd.concat([base, new_rows], ignore_index=True).sort_values("Date")
+    extended.to_csv(OOF_YOY_DELTA, index=False)
+    print(f"  yoy_delta OOF → {OOF_YOY_DELTA}  ({len(extended)} total rows, {len(new_rows)} new)")
+
+
 # ── Combined OOF ──────────────────────────────────────────────────────────────
 def rebuild_combined_oof():
     """Merge the four per-model OOF files into combined_oof.csv."""
     sources = [
-        (OOF_TABULAR,  "pred_ag_tabular"),
-        (OOF_TS,       "pred_ag_timeseries"),
-        (OOF_PROPHET,  "pred_prophet"),
-        (OOF_ANCHOR,   "pred_anchor_master"),
+        (OOF_TABULAR,   "pred_ag_tabular"),
+        (OOF_TS,        "pred_ag_timeseries"),
+        (OOF_ANCHOR,    "pred_anchor_master"),
+        (OOF_YOY_DELTA, "pred_yoy_delta"),
     ]
     missing = [str(p) for p, _ in sources if not p.exists()]
     if missing:
@@ -494,10 +423,10 @@ def update_oof(full_df: pd.DataFrame, force=False, max_age=6):
     if not _needs_update(OOF_UPDATED_AT, max_age, force):
         return
 
-    update_prophet_oof(full_df)
     update_ts_oof(full_df)
     update_tabular_oof(full_df)
     update_anchor_oof(full_df)
+    update_yoy_delta_oof(full_df)
     rebuild_combined_oof()
 
     _mark_trained(OOF_UPDATED_AT, {"latest_date": str(full_df["Date"].max().date())})
@@ -506,7 +435,6 @@ def update_oof(full_df: pd.DataFrame, force=False, max_age=6):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     p = argparse.ArgumentParser(description="Train prediction models and update OOF")
-    p.add_argument("--prophet",      action="store_true", help="Force prophet retrain")
     p.add_argument("--ts",           action="store_true", help="Force timeseries retrain")
     p.add_argument("--update-oof",   action="store_true", help="Force OOF update")
     p.add_argument("--all",          action="store_true", help="Force everything")
@@ -514,8 +442,6 @@ def main():
     p.add_argument("--ts-time-limit", type=int, default=DEFAULT_TS_TIME_LIMIT)
     p.add_argument("--ts-preset",    type=str, default=DEFAULT_TS_PRESET,
                    choices=["medium_quality", "good_quality", "high_quality", "best_quality"])
-    p.add_argument("--max-age-prophet", type=int, default=1,
-                   help="Max age (days) before prophet retrain (default 1 = daily)")
     p.add_argument("--max-age-ts",   type=int, default=6,
                    help="Max age (days) before TS retrain (default 6 = weekly)")
     p.add_argument("--max-age-oof",  type=int, default=6,
@@ -523,14 +449,9 @@ def main():
     args = p.parse_args()
 
     print("Building feature dataframe...")
-    df_full    = load_feature_df(prune=False)   # for prophet + ts3 + anchor OOF
+    df_full    = load_feature_df(prune=False)   # for ts3 + anchor + yoy_delta OOF
     print(f"  {len(df_full)} rows  {df_full['Date'].min().date()} → {df_full['Date'].max().date()}")
 
-    train_prophet(
-        df_full,
-        force=(args.prophet or args.all),
-        max_age=args.max_age_prophet,
-    )
     train_timeseries(
         df_full,
         time_limit=args.ts_time_limit,

@@ -171,32 +171,83 @@ def _thresholds_from_summary(summary: dict) -> list[float]:
             thresholds.append(float(m.group(1)))
     return sorted(thresholds)
 
-THRESHOLDS = [2.40, 2.45, 2.50, 2.55]  # fallback only
+THRESHOLDS = [2.30, 2.35, 2.40, 2.45, 2.50, 2.55, 2.60, 2.65, 2.70, 2.75, 2.80]  # fallback only
 EDGE_MIN   = 0.03
 KELLY_MIN_PCT = 0.05
 BANKROLL   = float(os.environ.get("KALSHI_BANKROLL", "250"))
 
-# ── Ensemble routing constants ────────────────────────────────────────────────
+# ── Ensemble routing constants (yoy_delta dropped from production 2026-09-21
+# — its holiday-contamination guard zeroes the trend-correction term for
+# ~70% of all history, degrading it to a naive last-year lookup; see
+# production_router.py docstring) ──────────────────────────────────────────
+# Re-fit 2026-09-22 after fixing a day-of-week misalignment bug in
+# recent_vol_vs_lag365_7d/14d, lag365_error_7d, and lag365_residual_anchor
+# (build_features.py) and retraining TS3 on the corrected covariates — ts3's
+# honest OOF error rose enough that it now gets zero weight in NORMAL and
+# SHOULDER_POST. Kept in sync with daily_predict.py's ENSEMBLE_WEIGHTS.
+# NORMAL is split on yoy_delta_trend_available (build_features.add_yoy_delta_
+# feature). The router emits NORMAL_YOY_AVAILABLE / NORMAL_YOY_UNAVAILABLE as
+# regime names, so both must be keys here or the day-detail endpoint returns
+# no weights for those days. "NORMAL" kept as a legacy alias (= UNAVAILABLE)
+# so older prediction_history rows tagged plain "NORMAL" still render.
+# NORMAL_YOY_AVAILABLE re-fit 2026-09-30 after the yoy_delta rebuild (5-week
+# drop-variant, holiday-safe base).
 ENSEMBLE_WEIGHTS: dict[str, dict[str, float | None]] = {
-    "NORMAL":        {"tab": 0.491, "ts3": 0.250, "prophet": 0.022, "anchor": 0.238},
-    "SHOULDER_PRE":  {"tab": 0.005, "ts3": 0.103, "prophet": 0.001, "anchor": 0.891},
-    "SHOULDER_POST": {"tab": 0.881, "ts3": 0.072, "prophet": 0.047, "anchor": 0.000},
-    "PEAK_HOLIDAY":  {"tab": 1.000, "ts3": 0.000, "prophet": 0.000, "anchor": 0.000},
-    "STORM":         {"tab": None,  "ts3": None,   "prophet": None,  "anchor": None},
+    "NORMAL_YOY_UNAVAILABLE": {"tab": 0.600, "ts3": 0.000, "yoy_delta": 0.000, "anchor": 0.400},
+    "NORMAL_YOY_AVAILABLE":   {"tab": 0.350, "ts3": 0.000, "yoy_delta": 0.450, "anchor": 0.200},
+    "NORMAL":        {"tab": 0.600, "ts3": 0.000, "yoy_delta": 0.000, "anchor": 0.400},
+    "SHOULDER_PRE":  {"tab": 0.333, "ts3": 0.333, "yoy_delta": 0.000, "anchor": 0.333},
+    "SHOULDER_POST": {"tab": 0.500, "ts3": 0.000, "yoy_delta": 0.000, "anchor": 0.500},
+    "PEAK_HOLIDAY":  {"tab": 1.000, "ts3": 0.000, "yoy_delta": 0.000, "anchor": 0.000},
+    "STORM":         {"tab": None,  "ts3": None,   "yoy_delta": None,  "anchor": None},
 }
 
+# NORMAL weights can be refreshed dynamically without a code edit — see
+# ensemble_experiment/refresh_normal_weights.py, which fits a 50/50 blend of
+# full-history-to-date and last-30-day weights and writes this file. Mirrors
+# the loader in autogluon_predict.py so the dashboard and the live predict
+# pipeline never disagree.
+_DYNAMIC_NORMAL_WEIGHTS_PATH = BASE / "ensemble_experiment" / "output" / "dynamic_normal_weights.json"
+
+
+def _load_dynamic_normal_weights() -> dict | None:
+    if not _DYNAMIC_NORMAL_WEIGHTS_PATH.exists():
+        return None
+    try:
+        with open(_DYNAMIC_NORMAL_WEIGHTS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+_dyn = _load_dynamic_normal_weights()
+if _dyn is not None:
+    _order = _dyn["model_order"]
+    ENSEMBLE_WEIGHTS["NORMAL"] = dict(zip(_order, _dyn["weights_tuple"]))
+
+# Re-fit 2026-09-22 against the corrected anchor_master/TS3 OOF (see
+# ENSEMBLE_WEIGHTS comment above). Kept in sync with daily_predict.py's
+# REGIME_SIGMA.
 PLATT_SIGMA: dict[str, dict[str, int]] = {
-    "NORMAL":        {"sigma_raw": 76004,  "sigma_eff": 41617},
-    "SHOULDER_PRE":  {"sigma_raw": 56245,  "sigma_eff": 32246},
-    "SHOULDER_POST": {"sigma_raw": 72708,  "sigma_eff": 44135},
-    "PEAK_HOLIDAY":  {"sigma_raw": 124151, "sigma_eff": 82271},
+    "NORMAL":        {"sigma_raw": 67302,  "sigma_eff": 37058},
+    "SHOULDER_PRE":  {"sigma_raw": 93078,  "sigma_eff": 52956},
+    "SHOULDER_POST": {"sigma_raw": 82353,  "sigma_eff": 45824},
+    "PEAK_HOLIDAY":  {"sigma_raw": 123198, "sigma_eff": 70017},
     "STORM":         {"sigma_raw": 85228,  "sigma_eff": 57780},
 }
 
 
 def _prediction_history() -> pd.DataFrame:
+    """Loads prediction_history.csv with a `_row_order` column so callers can
+    break run_date ties (date-only, no time — collides if the pipeline runs
+    more than once on the same day) in favor of the most-recently-appended
+    row instead of an arbitrary one from pandas' stable sort."""
     p = BASE / "output_autogluon_predict/prediction_history.csv"
-    return pd.read_csv(p) if p.exists() else pd.DataFrame()
+    if not p.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(p)
+    df["_row_order"] = range(len(df))
+    return df
 
 
 def _kalshi_implied_avg(snap: pd.DataFrame) -> float | None:
@@ -264,7 +315,7 @@ def overview():
         # Look up prediction from history (before actual overwrote it)
         hist = _prediction_history()
         if not hist.empty and "Date" in hist.columns:
-            h = hist[hist["Date"] == last_date].sort_values("run_date", ascending=False)
+            h = hist[hist["Date"].apply(lambda x: str(pd.Timestamp(x).date())) == last_date].sort_values("run_date", ascending=False)
             if not h.empty:
                 yesterday_predicted = float(h.iloc[0]["predicted_volume"])
 
@@ -360,7 +411,7 @@ def forecast_daily(
     # Historical predictions from local prediction_history.csv
     hist = _prediction_history()
     if not hist.empty and "Date" in hist.columns:
-        latest_per_date = hist.sort_values("run_date", ascending=False).drop_duplicates(subset=["Date"], keep="first")
+        latest_per_date = hist.sort_values(["run_date", "_row_order"], ascending=False).drop_duplicates(subset=["Date"], keep="first")
         for _, row in latest_per_date.iterrows():
             d = str(pd.Timestamp(row["Date"]).date())
             if start and d < start:
@@ -465,7 +516,7 @@ def recent_runs(limit: int = Query(30)):
 def tomorrow_forecast():
     """
     Return per-model predictions + ensemble blend for the next unpredicted day.
-    Individual model columns (pred_ts3, pred_prophet, pred_anchor) are written
+    Individual model columns (pred_ts3, pred_yoy_delta, pred_anchor) are written
     by autogluon_predict.py when shadow models are available.
     """
     from datetime import date as date_cls
@@ -483,11 +534,11 @@ def tomorrow_forecast():
     target_date = str(r["Date"].date())
     regime      = str(r["regime"]) if pd.notna(r.get("regime")) else "NORMAL"
 
-    pred_tabular = _safe(r.get("pred_tabular"))
-    pred_ts3     = _safe(r.get("pred_ts3"))
-    pred_prophet = _safe(r.get("pred_prophet"))
-    pred_anchor  = _safe(r.get("pred_anchor"))
-    ensemble     = _safe(r.get("volume"))
+    pred_tabular   = _safe(r.get("pred_tabular"))
+    pred_ts3       = _safe(r.get("pred_ts3"))
+    pred_yoy_delta = _safe(r.get("pred_yoy_delta"))
+    pred_anchor    = _safe(r.get("pred_anchor"))
+    ensemble       = _safe(r.get("volume"))
 
     weights  = ENSEMBLE_WEIGHTS.get(regime, {})
     sigma_d  = PLATT_SIGMA.get(regime, {})
@@ -681,7 +732,7 @@ def tomorrow_forecast():
         "regime":        regime,
         "pred_tabular":  pred_tabular,
         "pred_ts3":      pred_ts3,
-        "pred_prophet":  pred_prophet,
+        "pred_yoy_delta": pred_yoy_delta,
         "pred_anchor":   pred_anchor,
         "pred_ensemble": ensemble,
         "weights":       weights,
@@ -787,9 +838,9 @@ def forecast_current_week():
     hist = _prediction_history()
     pred_lookup: dict[str, float] = {}
     if not hist.empty and "Date" in hist.columns:
-        latest = hist.sort_values("run_date", ascending=False).drop_duplicates(subset=["Date"], keep="first")
+        latest = hist.sort_values(["run_date", "_row_order"], ascending=False).drop_duplicates(subset=["Date"], keep="first")
         for _, h in latest.iterrows():
-            pred_lookup[str(h["Date"])] = float(h["predicted_volume"])
+            pred_lookup[str(pd.Timestamp(h["Date"]).date())] = float(h["predicted_volume"])
 
     # DB fallback for predictions
     week_dates = [str(pd.Timestamp(r["Date"]).date()) for _, r in df.iterrows()]
@@ -853,20 +904,177 @@ def forecast_current_week():
     }
 
 
-@app.get("/api/forecast/weekly-avg-tracker")
-def weekly_avg_tracker():
-    """Day-by-day evolution of model and Kalshi weekly avg predictions for the current week."""
+def _bell_curve_points(mu: float, sigma: float, n_points: int = 200, extra_x: float | None = None) -> list[dict]:
+    """extra_x: a value (e.g. the actual outcome) that must fall within the
+    plotted range even if it's an outlier beyond ±4σ, so its reference line
+    is never silently clipped off-chart."""
+    import math
+    x_min = mu - 4 * sigma
+    x_max = mu + 4 * sigma
+    if extra_x is not None:
+        pad = 0.5 * sigma
+        x_min = min(x_min, extra_x - pad)
+        x_max = max(x_max, extra_x + pad)
+    step  = (x_max - x_min) / n_points
+    points = []
+    for i in range(n_points + 1):
+        x = x_min + i * step
+        y = math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2 * math.pi))
+        points.append({"x": round(x / 1e6, 5), "y": round(y * 1e6, 6)})
+    return points
+
+
+@app.get("/api/forecast/day-detail")
+def forecast_day_detail(weeks_back: int = Query(0, ge=0)):
+    """Per-day breakdown for one Mon–Sun week: ensemble + per-model
+    predictions, and (for days that have already occurred) the actual
+    value, error, and a forecast-distribution bell curve — built for the
+    'cycle through each day' explorer page.
+
+    weeks_back=0 is the week containing today; weeks_back=1 is the prior
+    week, etc. Predictions come from the latest run per date in
+    prediction_history.csv, so this works for any week that history
+    covers (not just the live weekly_forecast.csv week).
+
+    Per-model columns (pred_ts3/pred_yoy_delta/pred_anchor) are only
+    available for already-actual days going forward from when this was
+    added — older history only has pred_tabular (prediction_history.csv
+    didn't retain the others before)."""
+    hist = _prediction_history()
+    if hist.empty or "Date" not in hist.columns:
+        return {"days": [], "week_start": None, "has_older_week": False}
+
+    hist["_date"] = pd.to_datetime(hist["Date"], format="mixed").dt.normalize()
+    latest = hist.sort_values(["run_date", "_row_order"], ascending=False).drop_duplicates(subset=["_date"], keep="first")
+    hist_lookup: dict[str, dict] = {str(h["_date"].date()): h.to_dict() for _, h in latest.iterrows()}
+
+    tsa = _tsa()
+    actual_lookup: dict[str, float] = {}
+    if not tsa.empty:
+        for _, t in tsa.iterrows():
+            actual_lookup[str(pd.Timestamp(t["Date"]).date())] = _safe(t["Volume"])
+
+    today = pd.Timestamp.now().normalize()
+    this_monday = today - pd.Timedelta(days=today.dayofweek)
+    week_monday = this_monday - pd.Timedelta(weeks=weeks_back)
+    week_dates = [week_monday + pd.Timedelta(days=i) for i in range(7)]
+
+    oldest_hist_date = hist["_date"].min()
+    has_older_week = (week_monday - pd.Timedelta(weeks=1)) >= (oldest_hist_date - pd.Timedelta(days=oldest_hist_date.dayofweek))
+
+    MODEL_COLS = ["pred_tabular", "pred_ts3", "pred_yoy_delta", "pred_anchor"]
+
+    days = []
+    for wd in week_dates:
+        date_str = str(wd.date())
+        h = hist_lookup.get(date_str, {})
+        actual_vol = actual_lookup.get(date_str)
+        is_actual = actual_vol is not None
+
+        regime = h.get("regime") or None
+        if isinstance(regime, float) and pd.isna(regime):
+            regime = None
+
+        models: dict[str, float | None] = {col: _safe(h.get(col)) for col in MODEL_COLS}
+
+        predicted_vol = _safe(h.get("predicted_volume"))
+        error = round(actual_vol - predicted_vol) if (actual_vol is not None and predicted_vol is not None) else None
+
+        weights  = ENSEMBLE_WEIGHTS.get(regime) if regime else None
+        sigma_d  = PLATT_SIGMA.get(regime, {}) if regime else {}
+        sigma_eff = sigma_d.get("sigma_eff")
+        sigma_raw = sigma_d.get("sigma_raw")
+
+        bell_curve = []
+        if is_actual and predicted_vol is not None and sigma_eff:
+            bell_curve = _bell_curve_points(predicted_vol, sigma_eff, extra_x=actual_vol)
+
+        days.append({
+            "date":          date_str,
+            "day_name":      wd.strftime("%A"),
+            "status":        "actual" if is_actual else "predicted",
+            "regime":        regime,
+            "ensemble":      actual_vol if is_actual else predicted_vol,
+            "predicted":     predicted_vol,
+            "actual":        actual_vol,
+            "error":         error,
+            "pred_tabular":  models["pred_tabular"],
+            "pred_ts3":      models["pred_ts3"],
+            "pred_yoy_delta": models["pred_yoy_delta"],
+            "pred_anchor":   models["pred_anchor"],
+            "weights":       weights,
+            "sigma_eff":     sigma_eff,
+            "sigma_raw":     sigma_raw,
+            "bell_curve":    bell_curve,
+        })
+
+    return {"days": days, "week_start": str(week_monday.date()), "has_older_week": bool(has_older_week)}
+
+
+def _week_monday_str(d: pd.Timestamp) -> str:
+    return str((d - pd.Timedelta(days=d.weekday())).date())
+
+
+@app.get("/api/forecast/weeks")
+def forecast_weeks():
+    """List available target weeks (Monday) for weekly-avg-tracker selection.
+
+    Sourced from prediction_history.csv distinct target week-mondays, with the
+    current week's monday (from weekly_forecast.csv) appended if missing.
+    Each entry includes the settled actual average if all 7 days are confirmed.
+    """
+    weeks: dict[str, dict] = {}
+
+    hist = _prediction_history()
+    if not hist.empty and "Date" in hist.columns:
+        dates = pd.to_datetime(hist["Date"], errors="coerce").dropna()
+        for d in dates.unique():
+            wm = _week_monday_str(pd.Timestamp(d))
+            weeks.setdefault(wm, {"week_monday": wm})
+
+    # Always include the current forecast week
     df = _weekly_forecast()
-    if df.empty:
-        return []
+    if not df.empty:
+        cur_wm = _week_monday_str(pd.Timestamp(df["Date"].iloc[0]))
+        weeks.setdefault(cur_wm, {"week_monday": cur_wm})
 
-    week_monday = str(pd.Timestamp(df["Date"].iloc[0]).date())
+    # Compute settled average from tsa_volume.csv where all 7 days exist
+    tsa = _tsa()
+    for wm, entry in weeks.items():
+        wm_ts = pd.Timestamp(wm)
+        end_ts = wm_ts + pd.Timedelta(days=6)
+        entry["settled_avg_millions"] = None
+        entry["is_current"] = (not df.empty and wm == _week_monday_str(pd.Timestamp(df["Date"].iloc[0])))
+        if not tsa.empty:
+            wk = tsa[(tsa["Date"] >= wm_ts) & (tsa["Date"] <= end_ts)]
+            vols = wk["Volume"].dropna()
+            if len(vols) == 7:
+                entry["settled_avg_millions"] = round(float(vols.mean()) / 1e6, 4)
 
-    # Model: from prediction_history grouped by run_date
+    return sorted(weeks.values(), key=lambda w: w["week_monday"], reverse=True)
+
+
+@app.get("/api/forecast/weekly-avg-tracker")
+def weekly_avg_tracker(week_monday: str | None = None):
+    """Day-by-day evolution of model and Kalshi weekly avg predictions.
+
+    Defaults to the current forecast week. Pass `week_monday=YYYY-MM-DD` to
+    inspect a past week — past weeks include `settled_avg_millions` (the actual
+    weekly average) when all 7 days are confirmed in tsa_volume.csv.
+    """
+    if week_monday is None:
+        df = _weekly_forecast()
+        if df.empty:
+            return {"week_monday": None, "points": [], "settled_avg_millions": None}
+        week_monday = _week_monday_str(pd.Timestamp(df["Date"].iloc[0]))
+
+    week_end = str((pd.Timestamp(week_monday) + pd.Timedelta(days=6)).date())
+
+    # Model: from prediction_history grouped by run_date, filtered to this target week
     hist = _prediction_history()
     model_points: list[dict] = []
     if not hist.empty and "Date" in hist.columns and "weekly_avg_millions" in hist.columns:
-        week_hist = hist[hist["Date"] >= week_monday]
+        week_hist = hist[(hist["Date"] >= week_monday) & (hist["Date"] <= week_end)]
         if not week_hist.empty:
             by_run = week_hist.groupby("run_date").first().reset_index()
             for _, row in by_run.sort_values("run_date").iterrows():
@@ -875,7 +1083,7 @@ def weekly_avg_tracker():
                     "model_avg_millions":  round(float(row["weekly_avg_millions"]), 4),
                 })
 
-    # DB fallback
+    # DB fallback (current week only — DB snapshots may not cover past weeks reliably)
     if not model_points:
         db_rows = db.query(
             """SELECT run_at::date AS run_date, weekly_avg_millions
@@ -890,8 +1098,8 @@ def weekly_avg_tracker():
                 "model_avg_millions": round(float(r["weekly_avg_millions"]), 4) if r["weekly_avg_millions"] else None,
             })
 
-    # Kalshi: from historical market snapshot CSVs
-    snap_files = sorted(glob.glob(str(BASE / "output_kalshi/market_snapshot_2*.csv")))
+    # Kalshi: from historical market snapshot CSVs (snapshots taken within the target week)
+    snap_files = sorted(glob.glob(str(BASE / "output_kalshi/archive/market_snapshot_2*.csv")))
     kalshi_by_date: dict[str, float | None] = {}
     for f in snap_files:
         ts = Path(f).stem.replace("market_snapshot_", "")
@@ -899,7 +1107,7 @@ def weekly_avg_tracker():
             snap_date = datetime.strptime(ts, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d")
         except ValueError:
             continue
-        if snap_date < week_monday:
+        if snap_date < week_monday or snap_date > week_end:
             continue
         try:
             snap_df = pd.read_csv(f)
@@ -909,17 +1117,32 @@ def weekly_avg_tracker():
         except Exception:
             continue
 
+    # Settled average: if all 7 days exist in tsa_volume.csv, compute actual avg
+    settled_avg = None
+    tsa = _tsa()
+    if not tsa.empty:
+        wm_ts = pd.Timestamp(week_monday)
+        end_ts = pd.Timestamp(week_end)
+        wk = tsa[(tsa["Date"] >= wm_ts) & (tsa["Date"] <= end_ts)]
+        vols = wk["Volume"].dropna()
+        if len(vols) == 7:
+            settled_avg = round(float(vols.mean()) / 1e6, 4)
+
     # Merge model + kalshi
     all_dates = sorted(set([p["run_date"] for p in model_points] + list(kalshi_by_date.keys())))
-    result = []
+    points = []
     for d in all_dates:
         mp = next((p for p in model_points if p["run_date"] == d), None)
-        result.append({
+        points.append({
             "date":                d,
             "model_avg_millions":  mp["model_avg_millions"] if mp else None,
             "kalshi_avg_millions": kalshi_by_date.get(d),
         })
-    return result
+    return {
+        "week_monday":          week_monday,
+        "points":               points,
+        "settled_avg_millions": settled_avg,
+    }
 
 
 def _kelly_would_trade(model_prob: float, ask_price: float | None, fee_rate: float = 0.07) -> bool:
@@ -1539,10 +1762,10 @@ def drift():
         if hist.empty or tsa.empty:
             return {"has_data": False}
         tsa_map = {str(r["Date"].date()): float(r["Volume"]) for _, r in tsa.iterrows() if pd.notna(r["Volume"])}
-        latest_pred = hist.sort_values("run_date", ascending=False).drop_duplicates(subset=["Date"], keep="first")
+        latest_pred = hist.sort_values(["run_date", "_row_order"], ascending=False).drop_duplicates(subset=["Date"], keep="first")
         rows = []
         for _, r in latest_pred.iterrows():
-            d = str(r["Date"])
+            d = str(pd.Timestamp(r["Date"]).date())
             if d in tsa_map:
                 rows.append({"date": d, "predicted": float(r["predicted_volume"]), "actual": tsa_map[d]})
 
@@ -2147,8 +2370,10 @@ def _ensemble_history_rows() -> list[dict]:
     return rows
 
 
-def _prophet_trained_at() -> dict | None:
-    p = BASE / "output_router_shadow/models/prophet_trained_at.json"
+def _ts_trained_at() -> dict | None:
+    """TS3 is the only remaining trained shadow model — yoy_delta is a
+    deterministic feature (build_features.add_yoy_delta_feature), no training."""
+    p = BASE / "output_router_shadow/models/ts_trained_at.json"
     if not p.exists():
         return None
     try:
@@ -2177,7 +2402,7 @@ def ensemble_summary():
         return {
             "n_predictions": 0,
             "regime_distribution": {},
-            "models_last_trained": _prophet_trained_at(),
+            "models_last_trained": _ts_trained_at(),
             "first_target_date": None,
             "last_target_date": None,
         }
@@ -2190,17 +2415,74 @@ def ensemble_summary():
     return {
         "n_predictions": len(rows),
         "regime_distribution": regime_dist,
-        "models_last_trained": _prophet_trained_at(),
+        "models_last_trained": _ts_trained_at(),
         "first_target_date": min(dates) if dates else None,
         "last_target_date": max(dates) if dates else None,
     }
+
+
+# ── Backlog / performance-tracking endpoints ─────────────────────────────────
+# Thin wrappers over backlog.py (CLI module). Returns NaN-safe JSON.
+import backlog as _backlog
+
+
+def _nan_to_none(obj):
+    if isinstance(obj, dict):
+        return {k: _nan_to_none(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_nan_to_none(v) for v in obj]
+    if isinstance(obj, float) and (pd.isna(obj) or obj != obj):
+        return None
+    return obj
+
+
+def _df_records(df: pd.DataFrame) -> list[dict]:
+    if df is None or df.empty:
+        return []
+    return _nan_to_none(df.to_dict(orient="records"))
+
+
+@app.get("/api/backlog")
+def api_backlog(
+    status: str = Query("all", description="open | resolved | all"),
+    market: Optional[str] = Query(None, description="daily | weekly"),
+    limit: int = Query(500),
+):
+    """Unified backlog rows: prediction × market × outcome × trade."""
+    def _fetch():
+        return _backlog.build_backlog(market)
+    df = _cached(f"backlog:{market}", 60, _fetch)
+    if df is None or df.empty:
+        return {"rows": [], "n": 0}
+    if status == "open":
+        df = df[~df["resolved"]]
+    elif status == "resolved":
+        df = df[df["resolved"]]
+    df = df.head(limit)
+    return {"rows": _df_records(df), "n": int(len(df))}
+
+
+@app.get("/api/backlog/perf")
+def api_backlog_perf(market: Optional[str] = Query(None)):
+    df = _cached(f"backlog:{market}", 60, lambda: _backlog.build_backlog(market))
+    return _nan_to_none(_backlog.performance_summary(df) if df is not None and not df.empty
+                        else {"overall": {"n": 0}, "by_market": {}, "by_weekday": {},
+                              "by_edge_bucket": {}})
+
+
+@app.get("/api/backlog/calibration")
+def api_backlog_calibration(market: Optional[str] = Query(None), bins: int = Query(10)):
+    df = _cached(f"backlog:{market}", 60, lambda: _backlog.build_backlog(market))
+    if df is None or df.empty:
+        return {"bins": []}
+    return {"bins": _nan_to_none(_backlog.calibration_table(df, bins=bins))}
 
 
 @app.get("/api/ensemble/weights")
 def ensemble_weights():
     """Static ensemble weight table with Platt sigma values per regime."""
     REGIME_NOTES = {
-        "NORMAL":        "",
+        "NORMAL":        "dynamic — refreshed by refresh_normal_weights.py" if _dyn else "",
         "SHOULDER_PRE":  "",
         "SHOULDER_POST": "",
         "PEAK_HOLIDAY":  "",
@@ -2214,10 +2496,40 @@ def ensemble_weights():
             "regime":     regime,
             "tab":        w["tab"],
             "ts3":        w["ts3"],
-            "prophet":    w["prophet"],
+            "yoy_delta":  w["yoy_delta"],
             "anchor":     w["anchor"],
             "sigma_raw":  s["sigma_raw"],
             "sigma_eff":  s["sigma_eff"],
             "note":       REGIME_NOTES.get(regime, ""),
         })
     return result
+
+
+@app.get("/api/ensemble/dynamic-weights")
+def ensemble_dynamic_weights():
+    """Full breakdown behind the dynamic NORMAL weights: full-history fit,
+    last-30-NORMAL-day fit, and the 50/50 blend actually in use — as written
+    by ensemble_experiment/refresh_normal_weights.py."""
+    dyn = _load_dynamic_normal_weights()
+    if dyn is None:
+        return {"has_data": False}
+
+    order = dyn["model_order"]
+
+    def as_dict(key: str) -> dict[str, float]:
+        return dict(zip(order, dyn[key]))
+
+    return {
+        "has_data":              True,
+        "regime":                dyn.get("regime", "NORMAL"),
+        "model_order":           order,
+        "full_history_weights":  as_dict("full_history_weights"),
+        "last30_weights":        as_dict("last30_weights"),
+        "blend_weights":         as_dict("weights_tuple"),
+        "method":                dyn.get("method"),
+        "generated_at":          dyn.get("generated_at"),
+        "n_full_history":        dyn.get("n_full_history"),
+        "n_last30":              dyn.get("n_last30"),
+        "date_range":            dyn.get("date_range"),
+        "quick_tabular_oof_mae": dyn.get("quick_tabular_oof_mae"),
+    }

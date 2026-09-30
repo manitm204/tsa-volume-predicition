@@ -15,10 +15,11 @@ import numpy as np
 import pandas as pd
 from production_router import (
     get_major_holiday_dates,
-    days_to_nearest_major_signed,
+    days_to_prior_and_next_major,
     STORM_TRIGGER_IMPACT,
     PEAK_HOLIDAY_WINDOW,
-    SHOULDER_WINDOW,
+    SHOULDER_PRE_WINDOW,
+    SHOULDER_POST_WINDOW,
 )
 
 # ── paths ──────────────────────────────────────────────────────────────────
@@ -30,10 +31,11 @@ WEATHER_PATH = os.path.join(ROOT, "data", "weather_national_features_with_lags.c
 oof = pd.read_csv(OOF_PATH, parse_dates=["Date"])
 
 MODELS = {
-    "ag_tabular":    "pred_ag_tabular",
-    "ag_timeseries": "pred_ag_timeseries",
-    "prophet":       "pred_prophet",
-    "anchor_master": "pred_anchor_master",
+    "ag_tabular":     "pred_ag_tabular",
+    "ag_timeseries":  "pred_ag_timeseries",
+    "prophet":        "pred_prophet",
+    "anchor_master":  "pred_anchor_master",
+    "seasonal_naive": "pred_seasonal_naive",
 }
 
 # ── attach storm features from weather ─────────────────────────────────────
@@ -44,23 +46,27 @@ oof["vol_wtd_storm_impact"] = oof["vol_wtd_storm_impact"].fillna(0.0)
 oof["storm_impact_sq"]   = oof["vol_wtd_storm_impact"] ** 2
 oof["storm_severe_flag"] = (oof["vol_wtd_storm_impact"] > 0.5).astype(int)
 
-# ── compute days_to_major_signed ───────────────────────────────────────────
+# ── compute days_to_prior / days_to_next ───────────────────────────────────
 years = sorted(oof["Date"].dt.year.unique())
 holidays = get_major_holiday_dates([y for y in range(min(years) - 1, max(years) + 2)])
 
-oof["days_to_major_signed"] = oof["Date"].apply(
-    lambda d: days_to_nearest_major_signed(d, holidays)
+_prior_next = oof["Date"].apply(
+    lambda d: pd.Series(days_to_prior_and_next_major(d, holidays),
+                        index=["days_prior", "days_next"])
 )
+oof[["days_prior", "days_next"]] = _prior_next
 
-# ── classify regimes ───────────────────────────────────────────────────────
+# ── classify regimes (asymmetric POST-priority) ────────────────────────────
 def classify_regime(row):
     if row["storm_severe_flag"] == 1:
         return "severe_storm" if row["storm_impact_sq"] >= STORM_TRIGGER_IMPACT else "moderate_storm"
-    d = row["days_to_major_signed"]
-    if abs(d) <= PEAK_HOLIDAY_WINDOW:
+    p, n = int(row["days_prior"]), int(row["days_next"])
+    if min(p, n) <= PEAK_HOLIDAY_WINDOW:
         return "peak_holiday"
-    if PEAK_HOLIDAY_WINDOW < abs(d) <= SHOULDER_WINDOW:
-        return "shoulder_pre" if d > 0 else "shoulder_post"
+    if PEAK_HOLIDAY_WINDOW < p <= SHOULDER_POST_WINDOW:
+        return "shoulder_post"
+    if PEAK_HOLIDAY_WINDOW < n <= SHOULDER_PRE_WINDOW:
+        return "shoulder_pre"
     return "normal"
 
 oof["regime"] = oof.apply(classify_regime, axis=1)

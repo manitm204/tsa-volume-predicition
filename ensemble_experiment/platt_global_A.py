@@ -31,8 +31,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, log_loss
 
 from production_router import (
-    get_major_holiday_dates, days_to_nearest_major_signed,
-    STORM_TRIGGER_IMPACT, PEAK_HOLIDAY_WINDOW, SHOULDER_WINDOW,
+    get_major_holiday_dates, days_to_prior_and_next_major,
+    STORM_TRIGGER_IMPACT, PEAK_HOLIDAY_WINDOW,
+    SHOULDER_PRE_WINDOW, SHOULDER_POST_WINDOW,
 )
 
 # ── paths ──────────────────────────────────────────────────────────────────
@@ -67,17 +68,19 @@ def load_data():
 
     years    = sorted(oof["Date"].dt.year.unique())
     holidays = get_major_holiday_dates(range(min(years) - 1, max(years) + 2))
-    oof["days_to_major_signed"] = oof["Date"].apply(
-        lambda d: days_to_nearest_major_signed(d, holidays)
+    prior_next = oof["Date"].apply(
+        lambda d: pd.Series(days_to_prior_and_next_major(d, holidays),
+                            index=["days_prior", "days_next"])
     )
+    oof[["days_prior", "days_next"]] = prior_next
 
     def classify(row):
         if row["storm_severe_flag"] == 1:
             return "severe_storm" if row["storm_impact_sq"] >= STORM_TRIGGER_IMPACT else "moderate_storm"
-        d = row["days_to_major_signed"]
-        if abs(d) <= PEAK_HOLIDAY_WINDOW:                         return "peak_holiday"
-        if PEAK_HOLIDAY_WINDOW < abs(d) <= SHOULDER_WINDOW:
-            return "shoulder_pre" if d > 0 else "shoulder_post"
+        p, n = int(row["days_prior"]), int(row["days_next"])
+        if min(p, n) <= PEAK_HOLIDAY_WINDOW:                       return "peak_holiday"
+        if PEAK_HOLIDAY_WINDOW < p <= SHOULDER_POST_WINDOW:        return "shoulder_post"
+        if PEAK_HOLIDAY_WINDOW < n <= SHOULDER_PRE_WINDOW:         return "shoulder_pre"
         return "normal"
 
     oof["regime"] = oof.apply(classify, axis=1)

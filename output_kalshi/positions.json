@@ -1,50 +1,32 @@
 {
-  "KXTSAW-26JUN14-A2.60": {
-    "yes": 21,
+  "KXTSAW-26OCT04-A2.35": {
+    "yes": 11,
     "no": 0,
-    "avg_price": 0.8500000000000001,
-    "cost_dollars": 17.85
+    "avg_price": 0.9745454545454546,
+    "cost_dollars": 10.72
   },
-  "KXTSAW-26JUN14-A2.65": {
-    "yes": 102,
+  "KXTSAW-26OCT04-A2.40": {
+    "yes": 30,
     "no": 0,
-    "avg_price": 0.46509803921568627,
-    "cost_dollars": 47.44
+    "avg_price": 0.5616666666666668,
+    "cost_dollars": 16.85
   },
-  "KXMAYORLA-26-SPRA": {
+  "KXTSAW-26OCT04-A2.45": {
     "yes": 0,
-    "no": 8,
-    "avg_price": 0.982,
-    "cost_dollars": 7.856
+    "no": 47,
+    "avg_price": 0.8729787234042553,
+    "cost_dollars": 41.03
   },
-  "KXTRUFTSA-26JUN05-T2500000": {
-    "yes": 5,
-    "no": 0,
-    "avg_price": 0.93,
-    "cost_dollars": 4.65
-  },
-  "KXTRUFTSA-26JUN05-T2600000": {
-    "yes": 22,
-    "no": 0,
-    "avg_price": 0.9140909090909091,
-    "cost_dollars": 20.11
-  },
-  "KXTRUFTSA-26JUN05-T2700000": {
-    "yes": 22,
-    "no": 0,
-    "avg_price": 0.8854545454545455,
-    "cost_dollars": 19.48
-  },
-  "KXTRUFTSA-26JUN05-T2800000": {
+  "KXRATECUTCOUNT-26DEC31-T0": {
     "yes": 62,
     "no": 0,
-    "avg_price": 0.14725806451612905,
-    "cost_dollars": 9.13
+    "avg_price": 0.9593877221324717,
+    "cost_dollars": 59.3861
   },
-  "KXCOACHONDATE-NE26-MVRA": {
-    "yes": 15,
-    "no": 0,
-    "avg_price": 0.7633333333333333,
-    "cost_dollars": 11.45
+  "KXRECSSNBER-26": {
+    "yes": 0,
+    "no": 20,
+    "avg_price": 0.9400000000000001,
+    "cost_dollars": 18.8
   }
 }

@@ -51,7 +51,7 @@ AUTO_TRADING = os.environ.get("KALSHI_AUTO_TRADING", "true").lower() != "false"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT  = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-THRESHOLDS = [2.40, 2.45, 2.50, 2.55]
+THRESHOLDS = [2.30, 2.35, 2.40, 2.45, 2.50, 2.55, 2.60, 2.65, 2.70, 2.75, 2.80]
 # Show edge only when |edge| is at least this many percentage points
 EDGE_THRESHOLD_PCT = 3.0
 

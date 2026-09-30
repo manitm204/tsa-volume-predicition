@@ -1,7 +1,7 @@
 {
   "source_column": "anchor_master",
   "source_file": "build_features.build_features_from_df (prune=False)",
-  "n_oof": 364,
+  "n_oof": 441,
   "n_missing": 0,
-  "overall_oof_mae": 79962.46738350167
+  "overall_oof_mae": 76363.25556774801
 }

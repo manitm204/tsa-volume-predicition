@@ -84,13 +84,24 @@ function useDailyChart(range: Range) {
       ? Math.round((d.actual - d.predicted) / 1000)
       : undefined,
   })), [data, labelFmt])
-  return { chartData, isLoading }
+  const cumResidData = useMemo(() => {
+    let running = 0
+    return (data ?? []).map(d => {
+      const r = d.actual != null && d.predicted != null ? d.actual - d.predicted : null
+      if (r != null) running += r
+      return {
+        date:   format(parseISO(d.date), labelFmt),
+        CumRes: r != null ? Math.round(running / 1000) : undefined,
+      }
+    })
+  }, [data, labelFmt])
+  return { chartData, cumResidData, isLoading }
 }
 
 export default function Forecast() {
   const [combinedRange, setCombinedRange] = useState<Range>("1m")
 
-  const { chartData: combinedData, isLoading: combinedLoading } = useDailyChart(combinedRange)
+  const { chartData: combinedData, cumResidData, isLoading: combinedLoading } = useDailyChart(combinedRange)
 
   const { data: week } = useQuery({ queryKey: ["forecast-week"], queryFn: api.forecastWeek })
 
@@ -211,6 +222,62 @@ export default function Forecast() {
                 <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: "#ef5466", opacity: 0.85 }} /> Error &lt; 0 (over-predicted)
               </span>
             </div>
+          </div>
+        )}
+      </GlassSection>
+
+      {/* ─── Cumulative residuals (bias drift) ─── */}
+      <GlassSection
+        title="Cumulative Residuals"
+        sub={`Running sum of (actual − predicted) — drift away from 0 = persistent bias · ${combinedRange.toUpperCase()} window`}
+        right={
+          (() => {
+            const last = [...cumResidData].reverse().find(d => d.CumRes != null)
+            return last?.CumRes != null ? (
+              <span
+                className="chip mono"
+                style={{ color: last.CumRes >= 0 ? "#22d3a4" : "#ef5466" }}
+              >
+                Σ residual: {last.CumRes >= 0 ? "+" : ""}{last.CumRes}k
+              </span>
+            ) : null
+          })()
+        }
+      >
+        {combinedLoading ? <div className="skeleton h-[200px]" /> : (
+          <div className="h-[180px] sm:h-[240px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={cumResidData} margin={{ top: 8, right: 14, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 6" stroke="rgba(99,140,255,0.07)" />
+              <XAxis
+                dataKey="date"
+                tick={{ fill: "#475569", fontSize: 10.5 }}
+                tickLine={false}
+                axisLine={{ stroke: "rgba(99,140,255,0.10)" }}
+                interval="preserveStartEnd"
+                minTickGap={combinedTickGap}
+              />
+              <YAxis
+                tick={{ fill: "#475569", fontSize: 11 }}
+                tickLine={false} axisLine={false}
+                tickFormatter={v => `${v >= 0 ? "+" : ""}${v}k`}
+                width={56}
+                domain={["auto", "auto"]}
+              />
+              <Tooltip content={<TT />} cursor={{ stroke: "rgba(96,165,250,0.20)" }} />
+              <ReferenceLine y={0} stroke="rgba(99,140,255,0.30)" strokeWidth={1.5} />
+              <Line
+                type="monotone"
+                dataKey="CumRes"
+                name="Error"
+                stroke="#a78bfa"
+                strokeWidth={2}
+                dot={false}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
           </div>
         )}
       </GlassSection>

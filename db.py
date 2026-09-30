@@ -152,6 +152,88 @@ CREATE TABLE IF NOT EXISTS order_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_oa_run_at ON order_actions (run_at);
 CREATE INDEX IF NOT EXISTS idx_oa_ticker ON order_actions (ticker);
+
+-- Per-threshold model probabilities for the daily KXTRUFTSA market.
+-- One row per (run_at, forecast_date, strike, direction). Direction is 'over' / 'under'.
+-- Sourced from daily_forecast.csv columns p_over_<strike>M / p_under_<strike>M.
+CREATE TABLE IF NOT EXISTS daily_threshold_snapshots (
+    id              SERIAL PRIMARY KEY,
+    run_at          TIMESTAMPTZ NOT NULL,
+    forecast_date   DATE        NOT NULL,
+    strike_millions FLOAT       NOT NULL,
+    direction       TEXT        NOT NULL,
+    model_prob      FLOAT,
+    UNIQUE (run_at, forecast_date, strike_millions, direction)
+);
+CREATE INDEX IF NOT EXISTS idx_dts_forecast_date ON daily_threshold_snapshots (forecast_date);
+CREATE INDEX IF NOT EXISTS idx_dts_run_at        ON daily_threshold_snapshots (run_at);
+CREATE INDEX IF NOT EXISTS idx_dts_strike        ON daily_threshold_snapshots (strike_millions);
+
+-- ─── Consolidated v2 schema ────────────────────────────────────────────────
+-- Goal: one table for predictions (daily + weekly), one for fills, one for
+-- settlements. Joins with market_snapshots give per-strike model + market
+-- + trade in one query.
+--
+-- predictions: per (run_at × forecast_date × market_type) point estimate
+-- and sigma. Replaces daily_forecast_snapshots + weekly_summary_snapshots
+-- point-estimate columns. Per-threshold probabilities live in market_snapshots
+-- (model_prob column), not here — that table is already the strike-level fact.
+CREATE TABLE IF NOT EXISTS predictions (
+    id              SERIAL PRIMARY KEY,
+    run_at          TIMESTAMPTZ NOT NULL,
+    forecast_date   DATE        NOT NULL,
+    market_type     TEXT        NOT NULL,           -- 'daily' | 'weekly'
+    day_name        TEXT,
+    status          TEXT,                            -- 'predicted' | 'actual' | 'ACTUAL'
+    regime          TEXT,
+    predicted_volume FLOAT,                          -- point estimate (passengers)
+    sigma            FLOAT,                          -- daily-σ for daily, weekly-σ for weekly
+    ci90_low         FLOAT,
+    ci90_high        FLOAT,
+    UNIQUE (run_at, forecast_date, market_type)
+);
+CREATE INDEX IF NOT EXISTS idx_pred_forecast_date ON predictions (forecast_date);
+CREATE INDEX IF NOT EXISTS idx_pred_run_at        ON predictions (run_at);
+CREATE INDEX IF NOT EXISTS idx_pred_market_type   ON predictions (market_type);
+
+-- Per-model breakdown (tabular / TS3 / yoy_delta / anchor) behind the
+-- ensemble predicted_volume above. Added so a day's individual-model
+-- predictions survive after it rolls from 'predicted' to 'actual' — the
+-- CSV pipeline (prediction_history.csv) only kept pred_tabular previously.
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS pred_tabular  FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS pred_ts3      FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS pred_yoy_delta FLOAT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS pred_anchor   FLOAT;
+
+-- fills: Postgres mirror of every Kalshi fill we've seen. Truth-of-record
+-- for what actually executed. Mirrors output_kalshi/trades.db fills schema.
+CREATE TABLE IF NOT EXISTS fills (
+    trade_id        TEXT PRIMARY KEY,
+    order_id        TEXT,
+    ticker          TEXT NOT NULL,
+    side            TEXT NOT NULL,                   -- 'yes' | 'no'
+    action          TEXT,                            -- 'buy' | 'sell'
+    count           INTEGER,
+    yes_price_cents FLOAT,
+    no_price_cents  FLOAT,
+    is_taker        BOOLEAN,
+    created_time    TIMESTAMPTZ,
+    market_type     TEXT,                            -- 'daily' | 'weekly'
+    strike_millions FLOAT,
+    event_date      DATE
+);
+CREATE INDEX IF NOT EXISTS idx_fills_ticker     ON fills (ticker);
+CREATE INDEX IF NOT EXISTS idx_fills_event_date ON fills (event_date);
+CREATE INDEX IF NOT EXISTS idx_fills_created    ON fills (created_time);
+
+-- settlements: per-ticker settlement outcome. Mirrors trades.db market_results.
+CREATE TABLE IF NOT EXISTS settlements (
+    ticker       TEXT PRIMARY KEY,
+    status       TEXT,                               -- 'finalized'/'settled'/'active'
+    result       TEXT,                               -- 'yes' | 'no' | NULL
+    settled_time TIMESTAMPTZ,
+    refreshed_at TIMESTAMPTZ
+);
 """
 
 
@@ -362,6 +444,279 @@ def write_order_actions(actions: list[dict]) -> None:
                 )
         conn.commit()
     print(f"[db] order_actions: inserted {len(actions)} rows for run_at={run_at}")
+
+
+@_guard
+def write_daily_threshold_snapshots(forecast_df: Any) -> None:
+    """Persist per-threshold model probs from a daily_forecast.csv row.
+
+    Pivots the wide p_over_<strike>M / p_under_<strike>M columns into long form.
+    Idempotent on (run_at, forecast_date, strike, direction).
+    """
+    import pandas as pd
+    if forecast_df is None or len(forecast_df) == 0:
+        return
+    run_at = _run_at()
+
+    rows: list[tuple] = []
+    for _, fr in forecast_df.iterrows():
+        try:
+            fdate = pd.Timestamp(fr.get("date") or fr.get("Date")).date()
+        except Exception:
+            continue
+        for col in forecast_df.columns:
+            if not (col.startswith("p_over_") or col.startswith("p_under_")):
+                continue
+            direction = "over" if col.startswith("p_over_") else "under"
+            try:
+                strike = float(col.split("_", 2)[-1].rstrip("M"))
+            except (ValueError, IndexError):
+                continue
+            v = fr[col]
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                prob = None
+            else:
+                prob = float(v)
+            rows.append((run_at, fdate, strike, direction, prob))
+
+    if not rows:
+        return
+
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO daily_threshold_snapshots
+                  (run_at, forecast_date, strike_millions, direction, model_prob)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (run_at, forecast_date, strike_millions, direction)
+                DO UPDATE SET model_prob = EXCLUDED.model_prob
+                """,
+                rows,
+                page_size=200,
+            )
+        conn.commit()
+    print(f"[db] daily_threshold_snapshots: upserted {len(rows)} rows for run_at={run_at}")
+
+
+# ── Consolidated v2 write helpers ────────────────────────────────────────────
+
+@_guard
+def write_predictions(rows: list[dict]) -> None:
+    """Upsert one row per (run_at, forecast_date, market_type).
+
+    Each row dict accepts:
+        forecast_date   (date | str | pd.Timestamp)
+        market_type     ('daily' | 'weekly')
+        day_name        (str, optional)
+        status          (str, optional)
+        regime          (str, optional)
+        predicted_volume, sigma, ci90_low, ci90_high (floats, optional)
+        pred_tabular, pred_ts3, pred_yoy_delta, pred_anchor (floats, optional)
+    """
+    import pandas as pd
+    if not rows:
+        return
+    run_at = _run_at()
+
+    def _to_date(v):
+        if v is None: return None
+        try: return pd.Timestamp(v).date()
+        except Exception: return None
+
+    def _f(v):
+        if v is None: return None
+        try:
+            f = float(v)
+            return None if (isinstance(f, float) and pd.isna(f)) else f
+        except (TypeError, ValueError):
+            return None
+
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO predictions
+                    (run_at, forecast_date, market_type, day_name, status,
+                     regime, predicted_volume, sigma, ci90_low, ci90_high,
+                     pred_tabular, pred_ts3, pred_yoy_delta, pred_anchor)
+                VALUES
+                    (%(run_at)s, %(forecast_date)s, %(market_type)s, %(day_name)s,
+                     %(status)s, %(regime)s, %(predicted_volume)s, %(sigma)s,
+                     %(ci90_low)s, %(ci90_high)s,
+                     %(pred_tabular)s, %(pred_ts3)s, %(pred_yoy_delta)s, %(pred_anchor)s)
+                ON CONFLICT (run_at, forecast_date, market_type) DO UPDATE SET
+                    day_name         = EXCLUDED.day_name,
+                    status           = EXCLUDED.status,
+                    regime           = EXCLUDED.regime,
+                    predicted_volume = EXCLUDED.predicted_volume,
+                    sigma            = EXCLUDED.sigma,
+                    ci90_low         = EXCLUDED.ci90_low,
+                    ci90_high        = EXCLUDED.ci90_high,
+                    pred_tabular     = EXCLUDED.pred_tabular,
+                    pred_ts3         = EXCLUDED.pred_ts3,
+                    pred_yoy_delta   = EXCLUDED.pred_yoy_delta,
+                    pred_anchor      = EXCLUDED.pred_anchor
+                """,
+                [
+                    {
+                        "run_at":           run_at,
+                        "forecast_date":    _to_date(r.get("forecast_date") or r.get("date")),
+                        "market_type":      r.get("market_type"),
+                        "day_name":         r.get("day_name"),
+                        "status":           r.get("status"),
+                        "regime":           r.get("regime"),
+                        "predicted_volume": _f(r.get("predicted_volume") or r.get("volume_forecast")),
+                        "sigma":            _f(r.get("sigma") or r.get("daily_sigma")),
+                        "ci90_low":         _f(r.get("ci90_low")),
+                        "ci90_high":        _f(r.get("ci90_high")),
+                        "pred_tabular":     _f(r.get("pred_tabular")),
+                        "pred_ts3":         _f(r.get("pred_ts3")),
+                        "pred_yoy_delta":   _f(r.get("pred_yoy_delta")),
+                        "pred_anchor":      _f(r.get("pred_anchor")),
+                    }
+                    for r in rows
+                ],
+                page_size=100,
+            )
+        conn.commit()
+    print(f"[db] predictions: upserted {len(rows)} rows for run_at={run_at}")
+
+
+@_guard
+def write_fills(fills: list[dict]) -> int:
+    """Upsert Kalshi fills into Postgres. Returns count actually upserted.
+
+    Each fill dict matches the SQLite `fills` row keys used by trades.py:
+        trade_id, order_id, ticker, side, action, count,
+        yes_price_cents, no_price_cents, is_taker, created_time,
+        market_type, strike_millions, event_date.
+    """
+    import pandas as pd
+    if not fills:
+        return 0
+
+    def _ts(v):
+        if not v: return None
+        try: return pd.Timestamp(v).to_pydatetime()
+        except Exception: return None
+
+    def _date(v):
+        if not v: return None
+        try: return pd.Timestamp(v).date()
+        except Exception: return None
+
+    def _f(v):
+        if v is None: return None
+        try:
+            f = float(v)
+            return None if pd.isna(f) else f
+        except (TypeError, ValueError): return None
+
+    rows = [
+        {
+            "trade_id":        f.get("trade_id"),
+            "order_id":        f.get("order_id"),
+            "ticker":          f.get("ticker"),
+            "side":            f.get("side"),
+            "action":          f.get("action"),
+            "count":           int(f["count"]) if f.get("count") is not None else None,
+            "yes_price_cents": _f(f.get("yes_price_cents")),
+            "no_price_cents":  _f(f.get("no_price_cents")),
+            "is_taker":        bool(f.get("is_taker")) if f.get("is_taker") is not None else None,
+            "created_time":    _ts(f.get("created_time")),
+            "market_type":     f.get("market_type"),
+            "strike_millions": _f(f.get("strike_millions")),
+            "event_date":      _date(f.get("event_date")),
+        }
+        for f in fills if f.get("trade_id")
+    ]
+    if not rows:
+        return 0
+
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO fills
+                    (trade_id, order_id, ticker, side, action, count,
+                     yes_price_cents, no_price_cents, is_taker, created_time,
+                     market_type, strike_millions, event_date)
+                VALUES
+                    (%(trade_id)s, %(order_id)s, %(ticker)s, %(side)s, %(action)s,
+                     %(count)s, %(yes_price_cents)s, %(no_price_cents)s, %(is_taker)s,
+                     %(created_time)s, %(market_type)s, %(strike_millions)s, %(event_date)s)
+                ON CONFLICT (trade_id) DO UPDATE SET
+                    ticker          = EXCLUDED.ticker,
+                    side            = EXCLUDED.side,
+                    action          = EXCLUDED.action,
+                    count           = EXCLUDED.count,
+                    yes_price_cents = EXCLUDED.yes_price_cents,
+                    no_price_cents  = EXCLUDED.no_price_cents,
+                    is_taker        = EXCLUDED.is_taker,
+                    created_time    = EXCLUDED.created_time,
+                    market_type     = EXCLUDED.market_type,
+                    strike_millions = EXCLUDED.strike_millions,
+                    event_date      = EXCLUDED.event_date
+                """,
+                rows,
+                page_size=200,
+            )
+        conn.commit()
+    print(f"[db] fills: upserted {len(rows)} rows")
+    return len(rows)
+
+
+@_guard
+def write_settlements(results: list[dict]) -> int:
+    """Upsert per-ticker settlement results.
+
+    Each row: {ticker, status, result, settled_time, refreshed_at}
+    """
+    import pandas as pd
+    if not results:
+        return 0
+
+    def _ts(v):
+        if not v: return None
+        try: return pd.Timestamp(v).to_pydatetime()
+        except Exception: return None
+
+    rows = [
+        {
+            "ticker":       r.get("ticker"),
+            "status":       r.get("status"),
+            "result":       r.get("result") or None,
+            "settled_time": _ts(r.get("settled_time")),
+            "refreshed_at": _ts(r.get("refreshed_at")) or datetime.now(timezone.utc),
+        }
+        for r in results if r.get("ticker")
+    ]
+    if not rows:
+        return 0
+
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO settlements (ticker, status, result, settled_time, refreshed_at)
+                VALUES (%(ticker)s, %(status)s, %(result)s, %(settled_time)s, %(refreshed_at)s)
+                ON CONFLICT (ticker) DO UPDATE SET
+                    status       = EXCLUDED.status,
+                    result       = EXCLUDED.result,
+                    settled_time = EXCLUDED.settled_time,
+                    refreshed_at = EXCLUDED.refreshed_at
+                """,
+                rows,
+                page_size=200,
+            )
+        conn.commit()
+    print(f"[db] settlements: upserted {len(rows)} rows")
+    return len(rows)
 
 
 # ── Read helpers (used by dashboard) ─────────────────────────────────────────

@@ -30,10 +30,11 @@ from scipy.optimize import minimize
 
 from production_router import (
     get_major_holiday_dates,
-    days_to_nearest_major_signed,
+    days_to_prior_and_next_major,
     STORM_TRIGGER_IMPACT,
     PEAK_HOLIDAY_WINDOW,
-    SHOULDER_WINDOW,
+    SHOULDER_PRE_WINDOW,
+    SHOULDER_POST_WINDOW,
     NORMAL_WEIGHTS,
     SHOULDER_PRE_WEIGHTS,
     SHOULDER_POST_WEIGHTS,
@@ -44,15 +45,35 @@ ROOT         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OOF_PATH     = os.path.join(ROOT, "ensemble_experiment", "output", "combined_oof.csv")
 WEATHER_PATH = os.path.join(ROOT, "data", "weather_national_features_with_lags.csv")
 
-MODEL_COLS  = ["pred_ag_tabular", "pred_ag_timeseries", "pred_prophet", "pred_anchor_master"]
-MODEL_NAMES = ["ag_tabular", "ag_timeseries", "prophet", "anchor_master"]
+# yoy_delta dropped from production (2026-09-21): its holiday-contamination
+# guard zeroes the trend-correction term for ~70% of all history, degrading
+# it to a naive last-year lookup — caused a ~134k MAE week (vs ~30-50k for
+# the other 3 models) when 2026 volume diverged from 2025. Left in the OOF
+# pipeline (yoy_delta_oof.py, combine_oof.py) for future reference/repair,
+# just excluded from the ensemble weight search below.
+MODEL_COLS  = ["pred_ag_tabular", "pred_ag_timeseries", "pred_anchor_master"]
+MODEL_NAMES = ["ag_tabular", "ag_timeseries", "anchor_master"]
 
-# Current production weights per regime (tab, ts, prophet, anchor)
+N_MODELS = len(MODEL_COLS)
+
+
+def _pad(w, n_models=N_MODELS):
+    w = np.asarray(w, dtype=float)
+    return np.concatenate([w, np.zeros(n_models - len(w))])
+
+
+def _drop_yoy(w4):
+    """Old 4-tuples are (tab, ts3, yoy_delta, anchor) — drop index 2."""
+    tab, ts3, _yoy, anchor = w4
+    return (tab, ts3, anchor)
+
+
+# Current production weights per regime (tab, ts, anchor) — yoy_delta dropped.
 PRODUCTION_WEIGHTS = {
-    "normal":       np.array(NORMAL_WEIGHTS),
-    "shoulder_pre": np.array(SHOULDER_PRE_WEIGHTS),
-    "shoulder_post":np.array(SHOULDER_POST_WEIGHTS),
-    "peak_holiday": np.array([1.0, 0.0, 0.0, 0.0]),   # tabular only
+    "normal":       _pad(_drop_yoy(NORMAL_WEIGHTS)),
+    "shoulder_pre": _pad(_drop_yoy(SHOULDER_PRE_WEIGHTS)),
+    "shoulder_post":_pad(_drop_yoy(SHOULDER_POST_WEIGHTS)),
+    "peak_holiday": _pad([1.0, 0.0, 0.0]),   # tabular only
 }
 
 REGIMES_TO_RUN = ["normal", "shoulder_pre", "shoulder_post", "peak_holiday"]
@@ -70,18 +91,23 @@ def load_all_data():
 
     years    = sorted(oof["Date"].dt.year.unique())
     holidays = get_major_holiday_dates(range(min(years) - 1, max(years) + 2))
-    oof["days_to_major_signed"] = oof["Date"].apply(
-        lambda d: days_to_nearest_major_signed(d, holidays)
+    prior_next = oof["Date"].apply(
+        lambda d: pd.Series(days_to_prior_and_next_major(d, holidays),
+                            index=["days_prior", "days_next"])
     )
+    oof[["days_prior", "days_next"]] = prior_next
 
     def classify(row):
         if row["storm_severe_flag"] == 1:
             return "severe_storm" if row["storm_impact_sq"] >= STORM_TRIGGER_IMPACT else "moderate_storm"
-        d = row["days_to_major_signed"]
-        if abs(d) <= PEAK_HOLIDAY_WINDOW:
+        p, n = int(row["days_prior"]), int(row["days_next"])
+        if min(p, n) <= PEAK_HOLIDAY_WINDOW:
             return "peak_holiday"
-        if PEAK_HOLIDAY_WINDOW < abs(d) <= SHOULDER_WINDOW:
-            return "shoulder_pre" if d > 0 else "shoulder_post"
+        # POST priority: SHOULDER_POST wins when both windows could apply.
+        if PEAK_HOLIDAY_WINDOW < p <= SHOULDER_POST_WINDOW:
+            return "shoulder_post"
+        if PEAK_HOLIDAY_WINDOW < n <= SHOULDER_PRE_WINDOW:
+            return "shoulder_pre"
         return "normal"
 
     oof["regime"] = oof.apply(classify, axis=1)
@@ -93,7 +119,7 @@ def mae(actual, pred):
     return np.mean(np.abs(actual - pred))
 
 def apply_weights(X, w):
-    """X: (n, 4)  w: (4,) → (n,)"""
+    """X: (n, k)  w: (k,) → (n,)"""
     return X @ w
 
 def sse_objective(w, X, y):
@@ -103,9 +129,10 @@ def mae_objective(w, X, y):
     return np.mean(np.abs(y - X @ w))
 
 def fit_weights(X, y, method):
-    """Fit weights on (X, y) using the given method. Returns w (4,)."""
-    w0 = np.ones(4) / 4
-    bounds = [(0, 1)] * 4
+    """Fit weights on (X, y) using the given method. Returns w (k,)."""
+    k = X.shape[1]
+    w0 = np.ones(k) / k
+    bounds = [(0, 1)] * k
     constraints = {"type": "eq", "fun": lambda w: w.sum() - 1}
 
     obj = sse_objective if method == "nnls" else mae_objective
@@ -122,24 +149,34 @@ def fit_weights(X, y, method):
 # ── grid search helpers ─────────────────────────────────────────────────────
 GRID_STEP = 0.05
 
-def build_weight_grid(step=GRID_STEP):
-    """All (w0,w1,w2,w3) with step resolution that sum to 1, each >= 0."""
+def build_weight_grid(step=GRID_STEP, dims=N_MODELS):
+    """All k-dim weight vectors with step resolution that sum to 1, each >= 0."""
     n = round(1.0 / step)
-    combos = []
-    for a in range(n + 1):
-        for b in range(n + 1 - a):
-            for c in range(n + 1 - a - b):
-                d = n - a - b - c
-                combos.append((a / n, b / n, c / n, d / n))
-    return np.array(combos)   # shape (n_combos, 4)
 
-WEIGHT_GRID = build_weight_grid()
+    def compositions(total, parts):
+        if parts == 1:
+            yield (total,)
+            return
+        for head in range(total + 1):
+            for rest in compositions(total - head, parts - 1):
+                yield (head,) + rest
 
-def best_grid_weights(X_train, y_train):
+    return np.array(list(compositions(n, dims))) / n   # shape (n_combos, dims)
+
+_GRID_CACHE = {}
+
+def weight_grid_for(dims):
+    if dims not in _GRID_CACHE:
+        _GRID_CACHE[dims] = build_weight_grid(dims=dims)
+    return _GRID_CACHE[dims]
+
+WEIGHT_GRID = weight_grid_for(N_MODELS)
+
+def best_grid_weights(X_train, y_train, grid):
     """Pick the grid combination that minimises MAE on (X_train, y_train)."""
-    preds = X_train @ WEIGHT_GRID.T          # (n_train, n_combos)
+    preds = X_train @ grid.T          # (n_train, n_combos)
     maes  = np.mean(np.abs(y_train[:, None] - preds), axis=0)
-    return WEIGHT_GRID[np.argmin(maes)]
+    return grid[np.argmin(maes)]
 
 
 # ── LOO evaluation ──────────────────────────────────────────────────────────
@@ -150,6 +187,7 @@ def loo_mae(X, y, method):
     Returns (loo_mae, per-fold errors).
     """
     n = len(y)
+    grid = weight_grid_for(X.shape[1])
     errors = np.empty(n)
     for i in range(n):
         mask = np.ones(n, dtype=bool)
@@ -157,7 +195,7 @@ def loo_mae(X, y, method):
         X_tr, y_tr = X[mask], y[mask]
 
         if method == "grid":
-            w = best_grid_weights(X_tr, y_tr)
+            w = best_grid_weights(X_tr, y_tr, grid)
         else:
             w = fit_weights(X_tr, y_tr, method)
 
@@ -169,7 +207,7 @@ def loo_mae(X, y, method):
 def insample_mae(X, y, method):
     """Fit on all data, return in-sample MAE + weights."""
     if method == "grid":
-        w = best_grid_weights(X, y)
+        w = best_grid_weights(X, y, weight_grid_for(X.shape[1]))
     else:
         w = fit_weights(X, y, method)
     return mae(y, X @ w), w
@@ -177,14 +215,18 @@ def insample_mae(X, y, method):
 
 # ── baseline weights ────────────────────────────────────────────────────────
 def inverse_mae_weights(X, y):
-    per_model_mae = np.array([mae(y, X[:, k]) for k in range(4)])
+    per_model_mae = np.array([mae(y, X[:, k]) for k in range(X.shape[1])])
     inv = 1.0 / np.maximum(per_model_mae, 1)
     return inv / inv.sum()
 
 # ── per-regime runner ──────────────────────────────────────────────────────
 def run_regime(regime, df_all):
+    model_cols  = MODEL_COLS
+    model_names = MODEL_NAMES
+    n_models    = N_MODELS
+
     df = df_all[df_all["regime"] == regime].reset_index(drop=True)
-    X  = df[MODEL_COLS].values.astype(float)
+    X  = df[model_cols].values.astype(float)
     y  = df["Volume"].values.astype(float)
     n  = len(df)
 
@@ -199,14 +241,14 @@ def run_regime(regime, df_all):
 
     # Individual model MAE
     print("\nIndividual model MAE:")
-    for k, m in enumerate(MODEL_NAMES):
+    for k, m in enumerate(model_names):
         print(f"  {m:<18}  {mae(y, X[:, k]):>9,.0f}")
 
     # Baselines
     results = {}
     w_prod  = PRODUCTION_WEIGHTS[regime]
-    w_equal = np.array([0.25, 0.25, 0.25, 0.25])
-    w_tab   = np.array([1.00, 0.00, 0.00, 0.00])
+    w_equal = np.ones(n_models) / n_models
+    w_tab   = _pad([1.00, 0.00, 0.00], n_models)
     w_inv   = inverse_mae_weights(X, y)
 
     results["production (current)"] = {"loo_mae": mae(y, X @ w_prod),  "weights": w_prod,  "loo_note": "(no fit)"}
@@ -229,7 +271,7 @@ def run_regime(regime, df_all):
     col_w = 14
     print("\n" + "-" * W)
     print(f"{'Method':<30}  {'LOO MAE':>12}  {'In-sample':>10}  {'Optimism':>9}  "
-          + "  ".join(f"{m:<{col_w}}" for m in MODEL_NAMES))
+          + "  ".join(f"{m:<{col_w}}" for m in model_names))
     print("-" * W)
 
     for name, r in results.items():
@@ -253,10 +295,11 @@ def run_regime(regime, df_all):
     print(f"\n  Best → {best_name}  |  LOO MAE={best['loo_mae']:,.0f}  "
           f"vs production={prod_mae:,.0f}  (Δ={delta:+,.0f})")
     print("  Recommended weights: "
-          + ", ".join(f"{m}={w:.3f}" for m, w in zip(MODEL_NAMES, best["weights"])))
+          + ", ".join(f"{m}={w:.3f}" for m, w in zip(model_names, best["weights"])))
 
     return {
         "regime": regime, "n": n,
+        "model_names": model_names,
         "best_method": best_name,
         "best_loo_mae": best["loo_mae"],
         "best_weights": best["weights"],
@@ -267,7 +310,8 @@ def run_regime(regime, df_all):
 
 # ── main ───────────────────────────────────────────────────────────────────
 def main():
-    print(f"\nGrid step: {GRID_STEP}  →  {len(WEIGHT_GRID):,} weight combinations")
+    print(f"\nGrid step: {GRID_STEP}  →  {len(weight_grid_for(N_MODELS)):,} weight combinations "
+          f"({N_MODELS} models)")
     df_all = load_all_data()
 
     summaries = []
@@ -275,20 +319,17 @@ def main():
         s = run_regime(regime, df_all)
         summaries.append(s)
 
-    # Cross-regime summary
+    # Cross-regime summary (model sets differ per regime, so print weights
+    # as name=value pairs rather than fixed columns).
     W = 110
     print("\n\n" + "=" * W)
     print("  CROSS-REGIME SUMMARY — recommended weights (best LOO method per regime)")
     print("=" * W)
-    print(f"{'Regime':<15}  {'n':>4}  {'Method':<26}  {'LOO MAE':>9}  {'vs prod':>8}  "
-          + "  ".join(f"{m:<14}" for m in MODEL_NAMES))
-    print("-" * W)
     for s in summaries:
-        w     = s["best_weights"]
         delta = s["best_loo_mae"] - s["prod_mae"]
-        w_str = "  ".join(f"{wi:.3f}" for wi in w)
-        print(f"{s['regime']:<15}  {s['n']:>4}  {s['best_method']:<26}  "
-              f"{s['best_loo_mae']:>9,.0f}  {delta:>+8,.0f}  {w_str}")
+        w_str = ", ".join(f"{m}={wi:.3f}" for m, wi in zip(s["model_names"], s["best_weights"]))
+        print(f"{s['regime']:<15}  n={s['n']:<5}  {s['best_method']:<26}  "
+              f"LOO={s['best_loo_mae']:>9,.0f}  vs_prod={delta:>+8,.0f}  {w_str}")
     print("=" * W)
     print()
 
@@ -301,7 +342,7 @@ def main():
     }
     # Regimes not in the search default to tabular-only.
     for r in ("moderate_storm", "severe_storm"):
-        weights_json[r] = [1.0, 0.0, 0.0, 0.0]
+        weights_json[r] = [1.0] + [0.0] * (N_MODELS - 1)
 
     weights_path = os.path.join(OUT_DIR, "best_weights.json")
     import json

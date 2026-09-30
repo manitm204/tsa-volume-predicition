@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #03060e;
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+        color: #e2e8f0;
+      }
+      .clip {
+        position: absolute;
+        inset: 0;
+      }
+      .display {
+        font-family: "Space Grotesk", "Inter", sans-serif;
+        letter-spacing: -0.02em;
+      }
+      .mono {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      .label {
+        font-size: 20px;
+        font-weight: 700;
+        color: #93a3c2;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+      }
+
+      /* ── Scene: The Claim ─────────────────────────────────────────── */
+      #scene-claim {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        background: #03060e;
+      }
+      .claim-line {
+        text-align: center;
+        font-weight: 700;
+      }
+      #claim-1 {
+        font-size: 78px;
+        color: #f4f6fb;
+      }
+      #claim-2 {
+        font-size: 58px;
+        background: linear-gradient(135deg, #22d3a4, #34d399 60%, #6ee7b7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      /* ── Scene: Dashboard ─────────────────────────────────────────── */
+      #scene-dash {
+        background: #03060e;
+        background-image: linear-gradient(rgba(99, 140, 255, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(99, 140, 255, 0.045) 1px, transparent 1px);
+        background-size: 40px 40px;
+      }
+      .sidebar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 340px;
+        height: 100%;
+        background: linear-gradient(180deg, #070b13 0%, #03060e 100%);
+        border-right: 1px solid rgba(99, 140, 255, 0.1);
+        padding: 44px 30px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding-bottom: 30px;
+        border-bottom: 1px solid rgba(99, 140, 255, 0.08);
+        margin-bottom: 26px;
+      }
+      .brand-mark {
+        width: 52px;
+        height: 52px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #22d3a4 0%, #11785e 100%);
+        box-shadow: 0 0 26px rgba(34, 211, 164, 0.45);
+        flex-shrink: 0;
+      }
+      .brand-name {
+        font-family: "Space Grotesk", sans-serif;
+        font-weight: 700;
+        font-size: 26px;
+        color: #f1f5f9;
+      }
+      .brand-sub {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        color: #22d3a4;
+        text-transform: uppercase;
+        margin-top: 3px;
+      }
+      .nav-item {
+        font-size: 20px;
+        font-weight: 600;
+        color: #93a3c2;
+        padding: 14px 16px;
+        border-radius: 10px;
+        border-left: 2px solid transparent;
+      }
+      .nav-item.active {
+        color: #22d3a4;
+        background: linear-gradient(90deg, rgba(34, 211, 164, 0.16) 0%, rgba(34, 211, 164, 0.03) 100%);
+        border-left: 2px solid #22d3a4;
+      }
+
+      .main-area {
+        position: absolute;
+        top: 0;
+        left: 340px;
+        right: 0;
+        bottom: 0;
+        padding: 56px 64px;
+      }
+
+      .hero-wrap {
+        position: relative;
+        width: 100%;
+      }
+      .hero-outer {
+        position: relative;
+        width: 100%;
+      }
+      .hero-ring {
+        --ring-angle: 180deg;
+        position: absolute;
+        inset: -3px;
+        border-radius: 26px;
+        background: conic-gradient(
+          from var(--ring-angle),
+          rgba(34, 211, 164, 0) 0deg,
+          rgba(34, 211, 164, 0.75) 70deg,
+          rgba(96, 165, 250, 0.75) 190deg,
+          rgba(167, 139, 250, 0.75) 280deg,
+          rgba(34, 211, 164, 0) 360deg
+        );
+        filter: blur(1px);
+      }
+      .hero-card {
+        position: relative;
+        background: linear-gradient(160deg, rgba(15, 23, 42, 0.96) 0%, rgba(5, 10, 22, 0.98) 100%);
+        border: 1px solid rgba(99, 140, 255, 0.14);
+        border-radius: 24px;
+        padding: 44px 50px;
+        box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+      }
+      .hero-eyebrow {
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        color: #22d3a4;
+        text-transform: uppercase;
+        margin-bottom: 22px;
+      }
+      .hero-rec {
+        font-size: 92px;
+        font-weight: 700;
+        line-height: 1;
+        background: linear-gradient(135deg, #60a5fa, #818cf8, #22d3a4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero-chips {
+        display: flex;
+        gap: 16px;
+        margin-top: 26px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        border-radius: 999px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .chip-buy {
+        background: rgba(34, 211, 164, 0.18);
+        color: #34d399;
+        border: 1px solid rgba(34, 211, 164, 0.35);
+        box-shadow: 0 0 20px rgba(34, 211, 164, 0.22);
+      }
+      .chip-neutral {
+        background: rgba(99, 140, 255, 0.08);
+        color: #93c5fd;
+        border: 1px solid rgba(99, 140, 255, 0.2);
+      }
+      .conf-wrap {
+        margin-top: 40px;
+        max-width: 560px;
+      }
+      .conf-label-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 18px;
+        color: #93a3c2;
+        font-weight: 700;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .conf-track {
+        height: 14px;
+        border-radius: 8px;
+        background: rgba(20, 29, 61, 0.7);
+        overflow: hidden;
+      }
+      .conf-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: 8px;
+        background: linear-gradient(90deg, #22d3a4, #60a5fa);
+        box-shadow: 0 0 16px rgba(34, 211, 164, 0.35);
+      }
+
+      .grade-pill {
+        position: absolute;
+        top: 44px;
+        right: 50px;
+        width: 118px;
+        height: 96px;
+        border-radius: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Space Grotesk", sans-serif;
+        font-weight: 700;
+        font-size: 56px;
+        color: #ecfdf5;
+        background: linear-gradient(135deg, #0d503e, #11785e);
+        border: 1px solid rgba(34, 211, 164, 0.55);
+        box-shadow: 0 0 34px rgba(34, 211, 164, 0.45);
+      }
+      .kelly-box {
+        position: absolute;
+        top: 158px;
+        right: 50px;
+        width: 220px;
+        padding: 18px 22px;
+        border-radius: 16px;
+        text-align: center;
+        background: linear-gradient(145deg, rgba(13, 21, 38, 0.95), rgba(8, 13, 24, 0.95));
+        border: 1px solid rgba(99, 140, 255, 0.14);
+      }
+      .kelly-label {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: #93a3c2;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      .kelly-value {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 42px;
+        font-weight: 700;
+        color: #22d3a4;
+      }
+
+      .ladder-panel {
+        margin-top: 40px;
+        width: 100%;
+        max-width: 1180px;
+        background: linear-gradient(145deg, rgba(13, 21, 38, 0.9), rgba(8, 13, 24, 0.92));
+        border: 1px solid rgba(99, 140, 255, 0.12);
+        border-radius: 22px;
+        padding: 34px 42px;
+      }
+      .ladder-title {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 30px;
+        font-weight: 700;
+        color: #f1f5f9;
+        margin-bottom: 4px;
+      }
+      .ladder-sub {
+        font-size: 17px;
+        color: #93a3c2;
+        margin-bottom: 22px;
+      }
+      .ladder-row {
+        display: grid;
+        grid-template-columns: 130px 1fr 100px 90px;
+        align-items: center;
+        gap: 20px;
+        padding: 10px 0;
+      }
+      .ladder-strike {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 700;
+        font-size: 24px;
+        color: #dbe4f3;
+      }
+      .ladder-track {
+        position: relative;
+        height: 18px;
+        border-radius: 9px;
+        background: rgba(20, 29, 61, 0.75);
+        overflow: hidden;
+      }
+      .ladder-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0%;
+        border-radius: 9px;
+        background: linear-gradient(90deg, #22d3a4, #60a5fa);
+        box-shadow: 0 0 14px rgba(34, 211, 164, 0.3);
+      }
+      .ladder-mark {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 3px;
+        background: #f59e0b;
+        box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
+        left: 0%;
+      }
+      .ladder-pct {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 700;
+        font-size: 22px;
+        text-align: right;
+        color: #dbe4f3;
+      }
+      .ladder-edge {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 700;
+        font-size: 20px;
+        text-align: right;
+        color: #22d3a4;
+      }
+
+      /* ── Scene: Outro ─────────────────────────────────────────────── */
+      #scene-outro {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #03060e;
+        text-align: center;
+      }
+      #outro-1 {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 58px;
+        font-weight: 700;
+        color: #f4f6fb;
+        max-width: 1400px;
+      }
+      #outro-2 {
+        font-size: 30px;
+        font-weight: 600;
+        color: #93a3c2;
+      }
+      .logo-card {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+      }
+      .logo-mark {
+        width: 74px;
+        height: 74px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, #22d3a4 0%, #11785e 100%);
+        box-shadow: 0 0 40px rgba(34, 211, 164, 0.5);
+      }
+      .logo-text-name {
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 46px;
+        font-weight: 700;
+        color: #f1f5f9;
+        text-align: left;
+      }
+      .logo-text-sub {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.24em;
+        color: #22d3a4;
+        text-transform: uppercase;
+        text-align: left;
+        margin-top: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="20"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- Scene 1: The Claim (0-3s) -->
+      <section id="scene-claim" class="clip" data-start="0" data-duration="3" data-track-index="1">
+        <div id="claim-1" class="claim-line display">THIS IS A TRADING TERMINAL.</div>
+        <div id="claim-2" class="claim-line display">FOR AIRPORT SECURITY LINES.</div>
+      </section>
+
+      <!-- Scene 2: Dashboard (3-16s) -->
+      <section id="scene-dash" class="clip" data-start="3" data-duration="13" data-track-index="1">
+        <aside id="sidebar" class="sidebar">
+          <div class="brand">
+            <div class="brand-mark"></div>
+            <div>
+              <div class="brand-name">TSA · EDGE</div>
+              <div class="brand-sub">Quant Terminal</div>
+            </div>
+          </div>
+          <nav>
+            <div class="nav-item active">Command</div>
+            <div class="nav-item">Tomorrow</div>
+            <div class="nav-item">This Week</div>
+            <div class="nav-item">Model</div>
+            <div class="nav-item">Ensemble</div>
+          </nav>
+        </aside>
+
+        <div class="main-area">
+          <div id="hero-wrap" class="hero-wrap">
+           <div class="hero-outer">
+            <div id="hero-ring" class="hero-ring"></div>
+            <div id="hero-card" class="hero-card">
+              <div class="hero-eyebrow">This Week's Signal</div>
+              <div id="hero-rec" class="hero-rec display">BUY YES 2.85M</div>
+              <div class="hero-chips">
+                <span id="chip-buy" class="chip chip-buy">▲ BUY YES</span>
+                <span id="chip-edge" class="chip chip-neutral">Edge +11.4%</span>
+                <span id="chip-ev" class="chip chip-neutral">EV +18.2%</span>
+              </div>
+              <div class="conf-wrap">
+                <div class="conf-label-row">
+                  <span>Model Confidence</span>
+                  <span id="conf-value" class="mono">0%</span>
+                </div>
+                <div class="conf-track">
+                  <div id="conf-fill" class="conf-fill"></div>
+                </div>
+              </div>
+
+              <div id="grade-pill" class="grade-pill display">A+</div>
+              <div id="kelly-box" class="kelly-box">
+                <div class="kelly-label">Kelly Size (½K)</div>
+                <div id="kelly-value" class="kelly-value mono">$0</div>
+              </div>
+            </div>
+           </div>
+
+            <div id="ladder-panel" class="ladder-panel">
+              <div class="ladder-title display">Probability Ladder</div>
+              <div class="ladder-sub">Model P(weekly avg ≥ strike) vs. Kalshi implied</div>
+
+              <div id="row-1" class="ladder-row">
+                <div class="ladder-strike">2.70M</div>
+                <div class="ladder-track">
+                  <div id="row-1-fill" class="ladder-fill"></div>
+                  <div id="row-1-mark" class="ladder-mark"></div>
+                </div>
+                <div class="ladder-pct">92%</div>
+                <div class="ladder-edge">+7%</div>
+              </div>
+              <div id="row-2" class="ladder-row">
+                <div class="ladder-strike">2.75M</div>
+                <div class="ladder-track">
+                  <div id="row-2-fill" class="ladder-fill"></div>
+                  <div id="row-2-mark" class="ladder-mark"></div>
+                </div>
+                <div class="ladder-pct">81%</div>
+                <div class="ladder-edge">+6%</div>
+              </div>
+              <div id="row-3" class="ladder-row">
+                <div class="ladder-strike">2.80M</div>
+                <div class="ladder-track">
+                  <div id="row-3-fill" class="ladder-fill"></div>
+                  <div id="row-3-mark" class="ladder-mark"></div>
+                </div>
+                <div class="ladder-pct">63%</div>
+                <div class="ladder-edge">+8%</div>
+              </div>
+              <div id="row-4" class="ladder-row">
+                <div class="ladder-strike">2.85M</div>
+                <div class="ladder-track">
+                  <div id="row-4-fill" class="ladder-fill"></div>
+                  <div id="row-4-mark" class="ladder-mark"></div>
+                </div>
+                <div class="ladder-pct">41%</div>
+                <div class="ladder-edge">+11%</div>
+              </div>
+              <div id="row-5" class="ladder-row">
+                <div class="ladder-strike">2.90M</div>
+                <div class="ladder-track">
+                  <div id="row-5-fill" class="ladder-fill"></div>
+                  <div id="row-5-mark" class="ladder-mark"></div>
+                </div>
+                <div class="ladder-pct">22%</div>
+                <div class="ladder-edge">+7%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Scene 3: Outro (16-20s) -->
+      <section id="scene-outro" class="clip" data-start="16" data-duration="4" data-track-index="1">
+        <div id="outro-1" class="display">PAST PERFORMANCE ≠ FUTURE RESULTS.</div>
+        <div id="outro-2">neither is TSA wait times.</div>
+        <div id="logo-card" class="logo-card">
+          <div class="logo-mark"></div>
+          <div>
+            <div class="logo-text-name">TSA · EDGE</div>
+            <div class="logo-text-sub">Quant Terminal</div>
+          </div>
+        </div>
+      </section>
+
+      <audio
+        id="music"
+        src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3"
+        data-start="0"
+        data-duration="20"
+        data-track-index="10"
+        data-volume="1"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[
+          {"t":0,"v":0.22},
+          {"t":2.8,"v":0.22},
+          {"t":3.0,"v":0.85},
+          {"t":15.6,"v":0.85},
+          {"t":16.0,"v":0.12},
+          {"t":18.4,"v":0.12},
+          {"t":18.8,"v":0.55},
+          {"t":20,"v":0.55}
+        ]}]}'
+      ></audio>
+    </div>
+
+    <script>
+      function countTo(id, from, to, opts) {
+        opts = opts || {};
+        const el = document.getElementById(id);
+        const prefix = opts.prefix || "";
+        const suffix = opts.suffix || "";
+        const obj = { v: from };
+        return { obj, apply: () => (el.textContent = prefix + Math.round(obj.v) + suffix) };
+      }
+
+      const tl = gsap.timeline({ paused: true });
+
+      /* Scene 1 — The Claim */
+      tl.fromTo("#claim-1", { scale: 1.16, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.26, ease: "power3.out" }, 0.12);
+      tl.fromTo("#claim-2", { scale: 1.16, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.28, ease: "power3.out" }, 1.35);
+
+      /* Scene 2 — Dashboard reveal */
+      tl.fromTo("#sidebar", { x: -360 }, { x: 0, duration: 0.4, ease: "power3.out" }, 3.05);
+      tl.fromTo("#hero-ring", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power2.out" }, 3.35);
+      {
+        const ring = document.getElementById("hero-ring");
+        const ringAngle = { v: 180 };
+        tl.to(
+          ringAngle,
+          {
+            v: 180 + 620,
+            duration: 12.4,
+            ease: "none",
+            onUpdate: () => ring.style.setProperty("--ring-angle", ringAngle.v + "deg"),
+          },
+          3.35,
+        );
+      }
+      tl.fromTo("#hero-card", { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power2.out" }, 3.62);
+
+      /* The trade call */
+      tl.fromTo("#hero-rec", { scale: 1.08, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.32, ease: "power3.out" }, 6.1);
+      tl.fromTo("#chip-buy", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: "power2.out" }, 6.6);
+      tl.fromTo("#chip-edge", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: "power2.out" }, 6.78);
+      tl.fromTo("#chip-ev", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: "power2.out" }, 6.96);
+      tl.fromTo("#conf-fill", { width: "0%" }, { width: "87%", duration: 0.85, ease: "power2.out" }, 7.15);
+      {
+        const c = countTo("conf-value", 0, 87, { suffix: "%" });
+        tl.to(c.obj, { v: 87, duration: 0.85, ease: "power2.out", onUpdate: c.apply }, 7.15);
+      }
+
+      /* Receipts: grade + kelly */
+      tl.fromTo("#grade-pill", { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.32, ease: "back.out(2.2)" }, 11.1);
+      tl.fromTo("#kelly-box", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 11.35);
+      {
+        const k = countTo("kelly-value", 0, 62, { prefix: "$" });
+        tl.to(k.obj, { v: 62, duration: 0.8, ease: "power2.out", onUpdate: k.apply }, 11.4);
+      }
+
+      /* Receipts: probability ladder */
+      tl.fromTo("#ladder-panel", { opacity: 0, scale: 0.97 }, { opacity: 1, scale: 1, duration: 0.22, ease: "power2.out" }, 12.55);
+
+      const rows = [
+        { i: 1, pct: 92, mark: 85, t: 12.85 },
+        { i: 2, pct: 81, mark: 75, t: 13.35 },
+        { i: 3, pct: 63, mark: 55, t: 13.85 },
+        { i: 4, pct: 41, mark: 30, t: 14.35 },
+        { i: 5, pct: 22, mark: 15, t: 14.85 },
+      ];
+      rows.forEach((r) => {
+        tl.fromTo(`#row-${r.i}`, { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.22, ease: "power2.out" }, r.t);
+        tl.fromTo(`#row-${r.i}-fill`, { width: "0%" }, { width: r.pct + "%", duration: 0.4, ease: "power2.out" }, r.t + 0.05);
+        tl.fromTo(`#row-${r.i}-mark`, { opacity: 0 }, { opacity: 1, duration: 0.2 }, r.t + 0.2);
+        tl.set(`#row-${r.i}-mark`, { left: r.mark + "%" }, r.t + 0.2);
+      });
+
+      /* Scene 3 — Outro */
+      tl.fromTo("#outro-1", { scale: 1.1, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "power3.out" }, 16.15);
+      tl.fromTo("#outro-2", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, 17.45);
+      tl.fromTo("#outro-1", { opacity: 1 }, { opacity: 0, duration: 0.2, immediateRender: false }, 18.5);
+      tl.fromTo("#outro-2", { opacity: 1 }, { opacity: 0, duration: 0.2, immediateRender: false }, 18.5);
+      tl.fromTo("#logo-card", { opacity: 0, scale: 0.94 }, { opacity: 1, scale: 1, duration: 0.32, ease: "power2.out" }, 18.65);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

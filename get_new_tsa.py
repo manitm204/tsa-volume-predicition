@@ -10,11 +10,24 @@ import requests
 TSA_PATH = Path(__file__).resolve().parent / "data" / "tsa_volume.csv"
 
 
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
 def _get(url: str, *, label: str, timeout: float = 20.0, retries: int = 4) -> requests.Response:
     last: BaseException | None = None
     for i in range(retries):
         try:
-            resp = requests.get(url, timeout=timeout)
+            resp = requests.get(url, timeout=timeout, headers=_BROWSER_HEADERS)
             resp.raise_for_status()
             return resp
         except requests.exceptions.HTTPError as e:

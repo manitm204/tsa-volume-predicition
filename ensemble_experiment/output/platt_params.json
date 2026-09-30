@@ -1,83 +1,83 @@
 {
   "normal": {
-    "A": 1.82627,
-    "B": -0.051206,
-    "sigma": 76003.84,
-    "sigma_effective": 41616.98,
-    "n": 269,
+    "A": 1.816137,
+    "B": -0.156458,
+    "sigma": 67301.59,
+    "sigma_effective": 37057.55,
+    "n": 225,
     "A_ci_95": [
-      1.622478,
-      2.068953
+      1.632239,
+      2.049369
     ],
     "B_ci_95": [
-      -0.318179,
-      0.174513
+      -0.421789,
+      0.08291
     ],
-    "brier_gaussian_loo": 0.036833,
-    "brier_fixed_A_loo": 0.038441,
-    "brier_platt_loo": 0.036897,
-    "ece_gaussian": 0.00845,
-    "ece_platt": 0.006621
+    "brier_gaussian_loo": 0.03844,
+    "brier_fixed_A_loo": 0.04011,
+    "brier_platt_loo": 0.038312,
+    "ece_gaussian": 0.008418,
+    "ece_platt": 0.005361
   },
   "shoulder_pre": {
-    "A": 1.744229,
-    "B": 0.233139,
-    "sigma": 56244.88,
-    "sigma_effective": 32246.28,
-    "n": 25,
+    "A": 1.757664,
+    "B": 0.726726,
+    "sigma": 93078.03,
+    "sigma_effective": 52955.54,
+    "n": 57,
     "A_ci_95": [
-      1.390415,
-      2.617108
+      1.359647,
+      2.611911
     ],
     "B_ci_95": [
-      -0.513216,
-      1.021357
+      0.226789,
+      1.323913
     ],
-    "brier_gaussian_loo": 0.032849,
-    "brier_fixed_A_loo": 0.0343,
-    "brier_platt_loo": 0.034376,
-    "ece_gaussian": 0.018416,
-    "ece_platt": 0.019971
+    "brier_gaussian_loo": 0.046923,
+    "brier_fixed_A_loo": 0.047377,
+    "brier_platt_loo": 0.043871,
+    "ece_gaussian": 0.035829,
+    "ece_platt": 0.016801
   },
   "shoulder_post": {
-    "A": 1.647411,
-    "B": -0.051768,
-    "sigma": 72708.3,
-    "sigma_effective": 44134.89,
-    "n": 26,
+    "A": 1.797166,
+    "B": -0.171,
+    "sigma": 82352.62,
+    "sigma_effective": 45823.59,
+    "n": 102,
     "A_ci_95": [
-      1.336928,
-      2.384414
+      1.529735,
+      2.20213
     ],
     "B_ci_95": [
-      -0.893411,
-      0.647576
+      -0.521719,
+      0.241836
     ],
-    "brier_gaussian_loo": 0.035529,
-    "brier_fixed_A_loo": 0.03707,
-    "brier_platt_loo": 0.037544,
-    "ece_gaussian": 0.013861,
-    "ece_platt": 0.016585
+    "brier_gaussian_loo": 0.038151,
+    "brier_fixed_A_loo": 0.039958,
+    "brier_platt_loo": 0.038676,
+    "ece_gaussian": 0.009329,
+    "ece_platt": 0.010647
   },
   "peak_holiday": {
-    "A": 1.509046,
-    "B": 0.227263,
-    "sigma": 124150.55,
-    "sigma_effective": 82270.88,
-    "n": 31,
+    "A": 1.759554,
+    "B": 0.126675,
+    "sigma": 123198.29,
+    "sigma_effective": 70016.79,
+    "n": 69,
     "A_ci_95": [
-      1.099856,
-      3.384864
+      1.393997,
+      2.474366
     ],
     "B_ci_95": [
-      -0.541118,
-      0.778169
+      -0.326815,
+      0.581349
     ],
-    "brier_gaussian_loo": 0.067258,
-    "brier_fixed_A_loo": 0.065426,
-    "brier_platt_loo": 0.072175,
-    "ece_gaussian": 0.057285,
-    "ece_platt": 0.062008
+    "brier_gaussian_loo": 0.053574,
+    "brier_fixed_A_loo": 0.052315,
+    "brier_platt_loo": 0.054199,
+    "ece_gaussian": 0.036952,
+    "ece_platt": 0.030406
   },
   "moderate_storm": {
     "A": 1.475052,
@@ -102,7 +102,7 @@
   "severe_storm": {
     "A": 1.0,
     "B": 0.0,
-    "sigma": 98959.41,
+    "sigma": 99615.91,
     "n": 2,
     "note": "n=2, skipped \u2014 using Gaussian fallback (A=1, B=0)"
   }

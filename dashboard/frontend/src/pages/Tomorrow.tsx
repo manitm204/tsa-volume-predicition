@@ -21,7 +21,7 @@ const REGIME_COLOR: Record<string, string> = {
 const MODEL_META = [
   { key: "pred_tabular", label: "Tabular",      color: "#60a5fa", desc: "AutoGluon tabular (autoregressive chain)" },
   { key: "pred_ts3",     label: "TS3",           color: "#a78bfa", desc: "AutoGluon TimeSeries (calendar + lag365)" },
-  { key: "pred_prophet", label: "Prophet",       color: "#fb923c", desc: "Prophet with 5 regressors" },
+  { key: "pred_yoy_delta", label: "YoY Delta",   color: "#fb923c", desc: "Last year + recent same-weekday YoY delta" },
   { key: "pred_anchor",  label: "Anchor",        color: "#facc15", desc: "anchor_master feature (lag-365 same-DOW)" },
 ];
 
@@ -170,7 +170,7 @@ export default function Tomorrow() {
             const val = data[key as keyof typeof data] as number | null;
             const wKey = key === "pred_tabular" ? "tab"
                        : key === "pred_ts3"     ? "ts3"
-                       : key === "pred_prophet" ? "prophet"
+                       : key === "pred_yoy_delta" ? "yoy_delta"
                        : "anchor";
             const w = weights?.[wKey] ?? null;
             const diff = val != null && ensemble != null ? val - ensemble : null;
@@ -214,7 +214,7 @@ export default function Tomorrow() {
             </div>
             <div className="text-[10px] text-slate-500">
               {weights
-                ? Object.entries({ tab: weights.tab, ts3: weights.ts3, prophet: weights.prophet, anchor: weights.anchor })
+                ? Object.entries({ tab: weights.tab, ts3: weights.ts3, yoy_delta: weights.yoy_delta, anchor: weights.anchor })
                     .filter(([, v]) => v != null && (v as number) > 0)
                     .map(([k, v]) => `${k} ${((v as number) * 100).toFixed(1)}%`)
                     .join(" · ")
@@ -406,13 +406,13 @@ export default function Tomorrow() {
                     )}
                     {isKalshi && (
                       <td className="py-2 text-right mono font-semibold"
-                          style={{ color: (t.edge_over ?? 0) > 0.02 ? "#22d3a4" : (t.edge_over ?? 0) < -0.02 ? "#ef5466" : "#94a3b8" }}>
+                          style={{ color: (t.edge_over ?? 0) > 0.05 ? "#22d3a4" : (t.edge_over ?? 0) < -0.05 ? "#ef5466" : "#94a3b8" }}>
                         {fmtPctSigned(t.edge_over)}
                       </td>
                     )}
                     {isKalshi && (
                       <td className="py-2 text-right mono font-semibold"
-                          style={{ color: (t.edge_under ?? 0) > 0.02 ? "#22d3a4" : (t.edge_under ?? 0) < -0.02 ? "#ef5466" : "#94a3b8" }}>
+                          style={{ color: (t.edge_under ?? 0) > 0.05 ? "#22d3a4" : (t.edge_under ?? 0) < -0.05 ? "#ef5466" : "#94a3b8" }}>
                         {fmtPctSigned(t.edge_under)}
                       </td>
                     )}

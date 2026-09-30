@@ -1,101 +1,180 @@
-# CLAUDE.md
+# Ruflo — Claude Code Configuration
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Rules
 
-## Commands
+- Do what has been asked; nothing more, nothing less
+- NEVER create files unless absolutely necessary — prefer editing existing files
+- NEVER create documentation files unless explicitly requested
+- NEVER save working files or tests to root — use `/src`, `/tests`, `/docs`, `/config`, `/scripts`
+- ALWAYS read a file before editing it
+- NEVER commit secrets, credentials, or .env files
+- NEVER add a `Co-Authored-By` trailer to user commits unless this project's `.claude/settings.json` has `attribution.commit` set (#2078). The Claude Code Bash tool may suggest one in its default commit-message template — ignore it. `Co-Authored-By` is semantic authorship attribution under git/GitHub convention; the tool is the facilitator, not a co-author.
+- Keep files under 500 lines
+- Validate input at system boundaries
+
+## Agent Comms (SendMessage-First Coordination)
+
+Named agents coordinate via `SendMessage`, not polling or shared state.
+
+```
+Lead (you) ←→ architect ←→ developer ←→ tester ←→ reviewer
+              (named agents message each other directly)
+```
+
+### Spawning a Coordinated Team
+
+```javascript
+// ALL agents in ONE message, each knows WHO to message next
+Agent({ prompt: "Research the codebase. SendMessage findings to 'architect'.",
+  subagent_type: "researcher", name: "researcher", run_in_background: true })
+Agent({ prompt: "Wait for 'researcher'. Design solution. SendMessage to 'coder'.",
+  subagent_type: "system-architect", name: "architect", run_in_background: true })
+Agent({ prompt: "Wait for 'architect'. Implement it. SendMessage to 'tester'.",
+  subagent_type: "coder", name: "coder", run_in_background: true })
+Agent({ prompt: "Wait for 'coder'. Write tests. SendMessage results to 'reviewer'.",
+  subagent_type: "tester", name: "tester", run_in_background: true })
+Agent({ prompt: "Wait for 'tester'. Review code quality and security.",
+  subagent_type: "reviewer", name: "reviewer", run_in_background: true })
+
+// Kick off the pipeline
+SendMessage({ to: "researcher", summary: "Start", message: "[task context]" })
+```
+
+### Patterns
+
+| Pattern | Flow | Use When |
+|---------|------|----------|
+| **Pipeline** | A → B → C → D | Sequential dependencies (feature dev) |
+| **Fan-out** | Lead → A, B, C → Lead | Independent parallel work (research) |
+| **Supervisor** | Lead ↔ workers | Ongoing coordination (complex refactor) |
+
+### Rules
+
+- ALWAYS name agents — `name: "role"` makes them addressable
+- ALWAYS include comms instructions in prompts — who to message, what to send
+- Spawn ALL agents in ONE message with `run_in_background: true`
+- After spawning: STOP, tell user what's running, wait for results
+- NEVER poll status — agents message back or complete automatically
+
+## Swarm & Routing
+
+### Config
+- **Topology**: hierarchical-mesh (anti-drift)
+- **Max Agents**: 5
+- **Memory**: hybrid
+- **HNSW**: Enabled
+- **Neural**: Enabled
 
 ```bash
-# Full daily pipeline (what cron runs)
-bash run_daily_pipeline.sh
-
-# Individual steps
-python3 get_new_tsa.py          # scrape tsa.gov → data/tsa_volume.csv
-python3 get_weather.py          # pull Open-Meteo → data/weather_national_features_with_lags.csv
-python3 build_features.py       # rebuild master_features.csv
-python3 autogluon_predict.py    # generate weekly forecast + probability summary
-python3 kalshi.py               # snapshot markets + place orders (live)
-python3 kalshi.py --dry-run     # simulate trading without placing orders
-python3 send_update.py          # send Telegram message
-python3 send_update.py --dry-run  # print message without sending
-
-# Retrain production model (required on a fresh machine or after adding data)
-python3 autogluon_full.py       # → output_autogluon_best/ag_final/ + OOF CSV
-
-# Peer-comparison evaluation (fixed holdout, not used for inference)
-python3 autogluon_evaluate.py
+npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 8 --strategy specialized
 ```
 
-Environment variables are loaded from `.env` by `run_daily_pipeline.sh` via `source .env`. Required vars: `KALSHI_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH`, `KALSHI_ENV` (prod/demo), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+### Agent Routing
 
-## Architecture
+| Task | Agents | Topology |
+|------|--------|----------|
+| Bug Fix | researcher, coder, tester | hierarchical |
+| Feature | architect, coder, tester, reviewer | hierarchical |
+| Refactor | architect, coder, reviewer | hierarchical |
+| Performance | perf-engineer, coder | hierarchical |
+| Security | security-architect, auditor | hierarchical |
 
-### Data flow (daily pipeline)
+### When to Swarm
+- **YES**: 3+ files, new features, cross-module refactoring, API changes, security, performance
+- **NO**: single file edits, 1-2 line fixes, docs updates, config changes, questions
 
+### 3-Tier Model Routing
+
+| Tier | Handler | Use Cases |
+|------|---------|-----------|
+| 1 | Agent Booster (WASM) | Simple transforms — skip LLM, use Edit directly |
+| 2 | Haiku | Simple tasks, low complexity |
+| 3 | Sonnet/Opus | Architecture, security, complex reasoning |
+
+## Memory & Learning
+
+### Before Any Task
+```bash
+npx @claude-flow/cli@latest memory search --query "[task keywords]" --namespace patterns
+npx @claude-flow/cli@latest hooks route --task "[task description]"
 ```
-tsa.gov  ──► data/tsa_volume.csv ──┐
-Open-Meteo ► data/weather_*.csv ───┤
-data/google_trends.csv ────────────┴─► build_features.py ─► master_features.csv
-                                                                      │
-                                              output_autogluon_best/ag_final
-                                                                      │
-                                              autogluon_predict.py ◄──┘
-                                                      │
-                                    ┌─────────────────┴───────────────────┐
-                              weekly_forecast.csv               weekly_summary.csv
-                            (daily actuals+preds)           (avg, std, p_over_XM cols)
-                                         │                          │
-                              kalshi.py ◄┘                          │
-                                  │                                 │
-                      market_snapshot_latest.csv                    │
-                                  │                                 │
-                              send_update.py ◄──────────────────────┘
-                                  │
-                            Telegram message
+
+### After Success
+```bash
+npx @claude-flow/cli@latest memory store --namespace patterns --key "[name]" --value "[what worked]"
+npx @claude-flow/cli@latest hooks post-task --task-id "[id]" --success true --store-results true
 ```
 
-### Two-model separation
+### MCP Tools (use `ToolSearch("keyword")` to discover)
 
-| File | Model dir | Purpose |
-|---|---|---|
-| `autogluon_full.py` | `output_autogluon_best/ag_final` | **Production model** — trains on all available data; generates `oof_predictions.csv` used for uncertainty estimation |
-| `autogluon_evaluate.py` | `output_autogluon_evaluate/ag_model` | Peer-comparison evaluation on a fixed holdout (2025-01-06 → 2026-01-04); never used for live inference |
-| `autogluon_predict.py` | loads from `output_autogluon_best/ag_final` | Runs daily inference; also loads OOF residuals from `output_autogluon_best/` for uncertainty |
+| Category | Key Tools |
+|----------|-----------|
+| **Memory** | `memory_store`, `memory_search`, `memory_search_unified` |
+| **Bridge** | `memory_import_claude`, `memory_bridge_status` |
+| **Swarm** | `swarm_init`, `swarm_status`, `swarm_health` |
+| **Agents** | `agent_spawn`, `agent_list`, `agent_status` |
+| **Hooks** | `hooks_route`, `hooks_post-task`, `hooks_worker-dispatch` |
+| **Security** | `aidefence_scan`, `aidefence_is_safe`, `aidefence_has_pii` |
+| **Hive-Mind** | `hive-mind_init`, `hive-mind_consensus`, `hive-mind_spawn` |
 
-**The evaluate model is not the production model.** Retraining is done with `autogluon_full.py`.
+### Background Workers
 
-### Feature pipeline (`build_features.py`)
+| Worker | When |
+|--------|------|
+| `audit` | After security changes |
+| `optimize` | After performance work |
+| `testgaps` | After adding features |
+| `map` | Every 5+ file changes |
+| `document` | After API changes |
 
-This file is both a runnable script and a shared module imported by all training/inference scripts. The pipeline builds ~100 engineered features, then prunes to the `KEEP_FEATURES` list (77 features fed to the model). Key feature families:
-- Calendar + holiday proximity (nearest holiday, rel-day, DOW interactions)
-- Volume lag/rolling (lag 1/3/7/14/28, same-DOW lags, DOW 4-week means)
-- Regime anchors — `anchor_master`, `lag365_blend_anchor`, `weather_penalized_anchor` — blended year-over-year same-DOW references adjusted by recent momentum
-- Within-week cumulative volume and DOW share
-- Weather penalty features (weighted snow/storm across 16 hub airports)
-- Google Trends signals (lagged 7 days to avoid leakage)
+```bash
+npx @claude-flow/cli@latest hooks worker dispatch --trigger audit
+```
 
-To add a new feature: add it to `build_features_from_df()`, add its name to `KEEP_FEATURES`, then re-run `build_features.py` and `autogluon_full.py`.
+## Agents
 
-### Autoregressive inference (`autogluon_predict.py`)
+**Core**: `coder`, `reviewer`, `tester`, `planner`, `researcher`
+**Architecture**: `system-architect`, `backend-dev`, `mobile-dev`
+**Security**: `security-architect`, `security-auditor`
+**Performance**: `performance-engineer`, `perf-analyzer`
+**Coordination**: `hierarchical-coordinator`, `mesh-coordinator`, `adaptive-coordinator`
+**GitHub**: `pr-manager`, `code-review-swarm`, `issue-tracker`, `release-manager`
 
-For future days in the current week, `build_features_for_date()` appends prior days' predictions to the TSA series before running the full feature pipeline. This means each day's prediction is fed as input to the next — prediction error compounds through the week.
+Any string works as a custom agent type.
 
-### Kalshi trading (`kalshi.py`)
+## Build & Test
 
-- Auth uses RSA-PSS-SHA256 (Elections API at `api.elections.kalshi.com`); keys loaded from `.env`
-- `fetch_portfolio_summary()` returns normalised positions/orders consumed by `send_update.py`
-- Market snapshots are written to `output_kalshi/market_snapshot_TIMESTAMP.csv` on every run; `market_snapshot_latest.csv` is always overwritten
-- Trading logic: reads `p_over_XM` columns from `weekly_summary.csv`, runs a Kelly ladder to size YES/NO positions, places aggressive market orders or passive limit orders depending on price
+- ALWAYS run tests after code changes
+- ALWAYS verify build succeeds before committing
 
-### Telegram update (`send_update.py`)
+```bash
+npm run build && npm test
+```
 
-Assembles the daily message from six sections (yesterday actual vs. predicted, weekly forecast summary, per-day forecast table, model-vs-Kalshi probability tables for YES and NO sides, positions, open orders, risk/bankroll). The `<pre>` blocks render as monospace tables in Telegram HTML parse mode. `save_prev_snapshots()` copies today's summary/forecast to `prev_*` files for tomorrow's change comparison — this is called after a successful send, not before.
+## CLI Quick Reference
 
-### Output directories
+```bash
+npx @claude-flow/cli@latest init --wizard           # Setup
+npx @claude-flow/cli@latest swarm init --v3-mode     # Start swarm
+npx @claude-flow/cli@latest memory search --query "" # Vector search
+npx @claude-flow/cli@latest hooks route --task ""    # Route to agent
+npx @claude-flow/cli@latest doctor --fix             # Diagnostics
+npx @claude-flow/cli@latest security scan            # Security scan
+npx @claude-flow/cli@latest performance benchmark    # Benchmarks
+```
 
-| Directory | Contents |
-|---|---|
-| `output_autogluon_best/` | Production model (`ag_final/`), OOF predictions, CV fold metrics |
-| `output_autogluon_evaluate/` | Evaluation-only model, holdout metrics |
-| `output_autogluon_predict/` | `weekly_forecast.csv`, `weekly_summary.csv`, `prev_*` copies |
-| `output_kalshi/` | Per-run market snapshots, action logs, `market_snapshot_latest.csv`, `positions.json` |
-| `data/` | Raw inputs: `tsa_volume.csv`, weather CSVs, `google_trends.csv` |
+26 commands, 140+ subcommands. Use `--help` on any command for details.
+
+## Setup
+
+```bash
+claude mcp add claude-flow -- npx -y ruflo@latest mcp start
+npx ruflo@latest doctor --fix
+```
+
+> The background `daemon` is optional. It runs interval workers that each spawn
+> a headless `claude` session, so it consumes tokens continuously. Start it only
+> if you want those sweeps: `npx ruflo@latest daemon start` (self-stops after 12h
+> by default; `--ttl 0` to disable, `daemon status --all` to audit running daemons).
+
+**Agent tool** handles execution (agents, files, code, git). **MCP tools** handle coordination (swarm, memory, hooks). **CLI** is the same via Bash.

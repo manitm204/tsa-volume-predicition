@@ -1,12 +1,12 @@
 import type {
   OverviewData, DailyPoint, CurrentWeekData, ProbRow,
   Position, OpenOrder, OrderHistoryRow, PnLData, BankrollData, OrderBookRow,
-  WeeklyAvgTrackerPoint, YoYPoint,
+  WeeklyAvgTrackerData, ForecastWeekOption, YoYPoint,
   ChangesData, WeatherImpactData, DriftData,
   FeatureAttributionsData,
   ShadowPrediction, ShadowSummary,
-  EnsembleWeightRow, EnsembleHistoryRow, EnsembleSummary,
-  TomorrowData,
+  EnsembleWeightRow, EnsembleHistoryRow, EnsembleSummary, DynamicWeightsData,
+  TomorrowData, DayDetailData,
 } from "../types";
 
 const BASE = "/api";
@@ -37,7 +37,8 @@ export const api = {
   pnl:             ()                             => get<PnLData>("/pnl"),
   bankroll:        ()                             => get<BankrollData>("/bankroll"),
   orderbook:       ()                             => get<OrderBookRow[]>("/orderbook"),
-  weeklyAvgTracker:()                             => get<WeeklyAvgTrackerPoint[]>("/forecast/weekly-avg-tracker"),
+  weeklyAvgTracker:(weekMonday?: string)          => get<WeeklyAvgTrackerData>("/forecast/weekly-avg-tracker", weekMonday ? { week_monday: weekMonday } : undefined),
+  forecastWeeks:   ()                             => get<ForecastWeekOption[]>("/forecast/weeks"),
   yoyComparison:   ()                             => get<YoYPoint[]>("/yoy-comparison"),
   changes:         ()                             => get<ChangesData>("/changes"),
   weatherImpact:   ()                             => get<WeatherImpactData>("/weather-impact"),
@@ -48,6 +49,8 @@ export const api = {
   ensembleWeights:    ()                           => get<EnsembleWeightRow[]>("/ensemble/weights"),
   ensembleHistory:    ()                           => get<EnsembleHistoryRow[]>("/ensemble/history"),
   ensembleSummary:    ()                           => get<EnsembleSummary>("/ensemble/summary"),
+  dynamicWeights:     ()                           => get<DynamicWeightsData>("/ensemble/dynamic-weights"),
+  dayDetail:          (weeksBack = 0)              => get<DayDetailData>("/forecast/day-detail", { weeks_back: String(weeksBack) }),
   tomorrow:           ()                           => get<TomorrowData>("/tomorrow"),
   refreshPositions:   ()                           => post<{ ok: boolean; source: string; n_positions: number; n_open_orders: number; refreshed_at: string }>("/refresh-positions"),
 };
