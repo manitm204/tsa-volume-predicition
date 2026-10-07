@@ -1,0 +1,15 @@
+0:[lag365_residual_anchor<2403987] yes=1,no=2,missing=1,gain=1.10672164e+14,cover=1642
+	1:[Volume_lag7<1972144] yes=3,no=4,missing=3,gain=2.1743251e+13,cover=894
+		3:[first_half_week_strength<2.69860816] yes=7,no=8,missing=8,gain=5.70675744e+12,cover=200
+			7:leaf=-448473,cover=168
+			8:leaf=-913999,cover=32
+		4:[nearest_holiday_aligned_lag<1980996.5] yes=9,no=10,missing=10,gain=3.6344116e+12,cover=694
+			9:leaf=-339910.594,cover=90
+			10:leaf=-124870.602,cover=604
+	2:[lag365_residual_anchor<2610562] yes=5,no=6,missing=6,gain=1.03155216e+13,cover=748
+		5:[nearest_holiday_expected_vol<2127952.5] yes=11,no=12,missing=12,gain=1.04224417e+12,cover=319
+			11:leaf=-8484.44824,cover=38
+			12:leaf=167716.688,cover=281
+		6:[lag365_residual_anchor<2820152] yes=13,no=14,missing=14,gain=2.86808185e+12,cover=429
+			13:leaf=335245.75,cover=321
+			14:leaf=527687.625,cover=108
