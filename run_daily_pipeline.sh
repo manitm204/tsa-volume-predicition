@@ -32,5 +32,5 @@ echo "[pipeline] Run ID: $PIPELINE_RUN_TS  PY=$PY"
 
 "$PY" autogluon_predict.py
 
-"$PY" kalshi.py --bankroll "$BANKROLL" --daily-bankroll 100
+#"$PY" kalshi.py --bankroll "$BANKROLL" --daily-bankroll 100
 "$PY" send_update.py

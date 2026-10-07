@@ -1,21 +1,39 @@
 {
-  "KXTSAW-26OCT04-A2.35": {
-    "yes": 11,
+  "KXNFLGAME-26OCT11DETARI-DET": {
+    "yes": 17,
     "no": 0,
-    "avg_price": 0.9745454545454546,
-    "cost_dollars": 10.72
+    "avg_price": 0.6799999999999999,
+    "cost_dollars": 11.7368
   },
-  "KXTSAW-26OCT04-A2.40": {
-    "yes": 30,
+  "KXTSAW-26OCT11-A2.45": {
+    "yes": 32,
     "no": 0,
-    "avg_price": 0.5616666666666668,
-    "cost_dollars": 16.85
+    "avg_price": 0.9143236565781345,
+    "cost_dollars": 29.6058
   },
-  "KXTSAW-26OCT04-A2.45": {
+  "KXTSAW-26OCT11-A2.50": {
+    "yes": 152,
+    "no": 0,
+    "avg_price": 0.25755821602420736,
+    "cost_dollars": 39.154
+  },
+  "KXTSAW-26OCT11-A2.55": {
+    "yes": 10,
+    "no": 0,
+    "avg_price": 0.06,
+    "cost_dollars": 0.6
+  },
+  "KXTSAW-26OCT11-A2.60": {
     "yes": 0,
-    "no": 47,
-    "avg_price": 0.8729787234042553,
-    "cost_dollars": 41.03
+    "no": 6,
+    "avg_price": 0.85,
+    "cost_dollars": 5.1
+  },
+  "KXUFCHEAVYWEIGHTTITLE-26-AVOL": {
+    "yes": 0,
+    "no": 50,
+    "avg_price": 0.99,
+    "cost_dollars": 49.5
   },
   "KXRATECUTCOUNT-26DEC31-T0": {
     "yes": 62,
