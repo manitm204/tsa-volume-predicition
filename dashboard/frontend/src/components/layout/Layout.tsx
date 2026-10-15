@@ -10,6 +10,7 @@ const titles: Record<string, string> = {
   "/week":     "This Week",
   "/shadow":   "Ensemble Router",
   "/ensemble": "Ensemble Router",
+  "/mispricing": "Kalshi Mispricing",
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {

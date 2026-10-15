@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Zap, Crosshair, LineChart, CalendarRange, TrendingUp, GitBranch, Scale, CalendarDays, X, type LucideIcon,
+  Zap, Crosshair, LineChart, CalendarRange, TrendingUp, GitBranch, Scale, CalendarDays, Sigma, X, type LucideIcon,
 } from "lucide-react";
 import { api } from "../../api/client";
 import { StatusDot } from "../ui/StatusDot";
@@ -20,6 +20,7 @@ const links: Link[] = [
   { to: "/week",     label: "This Week", Icon: CalendarRange, hint: "Forecast ladder"         },
   { to: "/forecast", label: "Model",     Icon: LineChart,     hint: "Accuracy / scorecard"    },
   { to: "/shadow",   label: "Ensemble",  Icon: GitBranch,     hint: "Regime routing & weights"},
+  { to: "/mispricing", label: "Mispricing", Icon: Sigma,       hint: "Normal fit vs Kalshi mids"},
   { to: "/dynamic-weights", label: "Weight Refresh", Icon: Scale, hint: "Full-history vs last-30d blend"},
 ];
 

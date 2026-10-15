@@ -7,6 +7,7 @@ import type {
   ShadowPrediction, ShadowSummary,
   EnsembleWeightRow, EnsembleHistoryRow, EnsembleSummary, DynamicWeightsData,
   TomorrowData, DayDetailData,
+  MispricingData,
 } from "../types";
 
 const BASE = "/api";
@@ -52,5 +53,6 @@ export const api = {
   dynamicWeights:     ()                           => get<DynamicWeightsData>("/ensemble/dynamic-weights"),
   dayDetail:          (weeksBack = 0)              => get<DayDetailData>("/forecast/day-detail", { weeks_back: String(weeksBack) }),
   tomorrow:           ()                           => get<TomorrowData>("/tomorrow"),
+  mispricing:         ()                           => get<MispricingData>("/mispricing"),
   refreshPositions:   ()                           => post<{ ok: boolean; source: string; n_positions: number; n_open_orders: number; refreshed_at: string }>("/refresh-positions"),
 };

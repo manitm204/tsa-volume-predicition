@@ -423,3 +423,46 @@ export interface TomorrowThreshold {
   volume: number | null;
   open_interest: number | null;
 }
+
+// ── Kalshi mispricing (normal fit to implied survival probabilities) ──────────
+export interface MispricingPoint {
+  strike: number;
+  ticker: string;
+  market_prob: number;
+  fitted_prob: number;
+  residual: number;
+  yes_bid: number | null;
+  yes_ask: number | null;
+  yes_mid: number | null;
+  volume: number | null;
+}
+
+export interface MispricingRow {
+  strike: number;
+  ticker: string;
+  market_prob: number;
+  fitted_prob: number;
+  residual: number;
+  abs_residual: number;
+  direction: "rich" | "cheap";
+  volume: number | null;
+}
+
+export interface MispricingData {
+  has_data: boolean;
+  reason?: string;
+  event_ticker?: string | null;
+  mu?: number;
+  sigma?: number;
+  n_points?: number;
+  points?: MispricingPoint[];
+  density_points?: { x: number; density: number }[];
+  survival_curve?: { x: number; y: number }[];
+  pdf_curve?: { x: number; y: number }[];
+  mispricings?: MispricingRow[];
+  model_mu?: number | null;
+  model_sigma?: number | null;
+  model_survival_curve?: { x: number; y: number }[] | null;
+  model_pdf_curve?: { x: number; y: number }[] | null;
+  model_survival_points?: { x: number; y: number }[] | null;
+}

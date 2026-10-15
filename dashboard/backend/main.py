@@ -1344,6 +1344,156 @@ def orderbook():
     return result
 
 
+@app.get("/api/mispricing")
+def mispricing():
+    """Fit a normal distribution to Kalshi's own implied survival probabilities
+    (P(volume > strike)) via least-squares, then surface strikes whose mid price
+    deviates most from that smooth fit — i.e. internal mispricings."""
+    import numpy as np
+    from scipy.optimize import curve_fit
+    from scipy.stats import norm
+
+    snap = _snapshot()
+    if snap.empty or "strike_millions" not in snap.columns:
+        return {"has_data": False, "reason": "no snapshot"}
+
+    # Active weekly event = the one with the most quoted strikes.
+    ev = None
+    df = snap
+    if "event_ticker" in snap.columns and snap["event_ticker"].notna().any():
+        ev = snap.groupby("event_ticker").size().idxmax()
+        df = snap[snap["event_ticker"] == ev]
+    df = df.sort_values("strike_millions")
+
+    # Implied survival prob per strike (edge rule: bid & no ask -> 1.0 in-the-money;
+    # ask & no bid -> 0.0 out-of-the-money; both quoted -> mid; neither -> drop).
+    points = []
+    for _, r in df.iterrows():
+        strike = _safe(r.get("strike_millions"))
+        if strike is None:
+            continue
+        yes_bid, yes_ask, yes_mid = r.get("yes_bid_cents"), r.get("yes_ask_cents"), r.get("yes_mid_cents")
+        has_bid, has_ask = not pd.isna(yes_bid), not pd.isna(yes_ask)
+        if has_bid and not has_ask:
+            prob = 1.0
+        elif has_ask and not has_bid:
+            prob = 0.0
+        elif has_bid and has_ask:
+            prob = float(yes_mid) / 100.0
+        else:
+            continue
+        points.append({
+            "strike": strike, "prob": prob,
+            "yes_bid": _safe(yes_bid, 100), "yes_ask": _safe(yes_ask, 100),
+            "yes_mid": _safe(yes_mid, 100), "volume": _safe(r.get("volume")),
+            "ticker": r.get("ticker", ""),
+        })
+
+    if len(points) < 3:
+        return {"has_data": False, "reason": "not enough quoted strikes", "event_ticker": ev}
+
+    # Focus on the transition region: middle strike (prob closest to 0.5) ± 3.
+    mid_i = min(range(len(points)), key=lambda i: abs(points[i]["prob"] - 0.5))
+    points = points[max(0, mid_i - 3): mid_i + 4]
+
+    xs = np.array([p["strike"] for p in points], dtype=float)
+    ps = np.array([p["prob"] for p in points], dtype=float)
+
+    def survival(x, mu, sigma):
+        return 1.0 - norm.cdf(x, loc=mu, scale=sigma)
+
+    mu0 = float(np.interp(0.5, ps[::-1], xs[::-1]))        # strike where survival ~ 0.5
+    sigma0 = max((xs.max() - xs.min()) / 6.0, 0.02)
+    try:
+        popt, _ = curve_fit(
+            survival, xs, ps, p0=[mu0, sigma0],
+            bounds=([xs.min() - 1.0, 1e-3], [xs.max() + 1.0, 5.0]), maxfev=10000,
+        )
+        mu, sigma = float(popt[0]), float(popt[1])
+    except Exception as exc:  # noqa: BLE001
+        return {"has_data": False, "reason": f"fit failed: {exc}", "event_ticker": ev}
+
+    for p in points:
+        fitted = float(1.0 - norm.cdf(p["strike"], loc=mu, scale=sigma))
+        p["fitted_prob"] = round(fitted, 4)
+        p["residual"] = round(p["prob"] - fitted, 4)
+
+    # Implied density anchored at each actual strike (centered survival diff),
+    # so bell-view dots land on the real thresholds, not interval midpoints.
+    density_points = []
+    n = len(points)
+    for i in range(n):
+        lo_i, hi_i = max(0, i - 1), min(n - 1, i + 1)
+        dx = points[hi_i]["strike"] - points[lo_i]["strike"]
+        if dx <= 0:
+            continue
+        dens = (points[lo_i]["prob"] - points[hi_i]["prob"]) / dx
+        density_points.append({"x": points[i]["strike"], "density": round(max(dens, 0.0), 6)})
+
+    lo = float(min(xs.min(), mu - 4 * sigma))
+    hi = float(max(xs.max(), mu + 4 * sigma))
+    grid = np.linspace(lo, hi, 120)
+    survival_curve = [{"x": round(float(x), 4), "y": round(float(1 - norm.cdf(x, mu, sigma)), 5)} for x in grid]
+    # Bell line = the fitted normal put through the SAME centered-difference operator
+    # (half-window = strike spacing) used for the market density dots, so a strike that
+    # is fairly priced lands exactly on the line and only genuine mispricing shows as a gap.
+    hw = float(np.median(np.diff(xs))) if len(xs) > 1 else sigma
+    pdf_curve = [
+        {"x": round(float(x), 4),
+         "y": round(float((norm.cdf(x + hw, mu, sigma) - norm.cdf(x - hw, mu, sigma)) / (2 * hw)), 6)}
+        for x in grid
+    ]
+
+    # ── My model overlay: Normal(weekly μ, days-left calibrated σ) ────────────
+    # σ uses the platt-calibrated weekly std so the model survival matches the
+    # model_prob the rest of the dashboard trades on. Survival space is exact;
+    # the bell shows the model's true density (tighter than the market's).
+    summary = _weekly_summary()
+    model_mu = _safe(summary.get("weekly_avg_millions"))
+    model_sigma = _safe(summary.get("weekly_avg_std_platt_millions")) or _safe(summary.get("weekly_avg_std_millions"))
+    model_survival_curve = model_pdf_curve = model_survival_points = None
+    if model_mu is not None and model_sigma and model_sigma > 0:
+        model_survival_curve = [
+            {"x": round(float(x), 4), "y": round(float(1 - norm.cdf(x, model_mu, model_sigma)), 5)} for x in grid
+        ]
+        model_pdf_curve = [
+            {"x": round(float(x), 4), "y": round(float(norm.pdf(x, model_mu, model_sigma)), 6)} for x in grid
+        ]
+        model_survival_points = [
+            {"x": p["strike"], "y": round(float(1 - norm.cdf(p["strike"], model_mu, model_sigma)), 4)} for p in points
+        ]
+
+    return {
+        "has_data": True,
+        "event_ticker": ev,
+        "mu": round(mu, 5),
+        "sigma": round(sigma, 5),
+        "model_mu": round(model_mu, 5) if model_mu is not None else None,
+        "model_sigma": round(model_sigma, 5) if model_sigma else None,
+        "model_survival_curve": model_survival_curve,
+        "model_pdf_curve": model_pdf_curve,
+        "model_survival_points": model_survival_points,
+        "n_points": len(points),
+        "points": [
+            {"strike": p["strike"], "ticker": p["ticker"], "market_prob": round(p["prob"], 4),
+             "fitted_prob": p["fitted_prob"], "residual": p["residual"],
+             "yes_bid": p["yes_bid"], "yes_ask": p["yes_ask"], "yes_mid": p["yes_mid"],
+             "volume": p["volume"]}
+            for p in points
+        ],
+        "density_points": density_points,
+        "survival_curve": survival_curve,
+        "pdf_curve": pdf_curve,
+        "mispricings": [
+            {"strike": p["strike"], "ticker": p["ticker"], "market_prob": round(p["prob"], 4),
+             "fitted_prob": p["fitted_prob"], "residual": p["residual"],
+             "abs_residual": round(abs(p["residual"]), 4),
+             "direction": "rich" if p["residual"] > 0 else "cheap", "volume": p["volume"]}
+            for p in points
+        ],
+    }
+
+
 @app.get("/api/pnl")
 def pnl():
     pos_data  = positions()

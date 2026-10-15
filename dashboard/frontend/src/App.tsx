@@ -7,6 +7,7 @@ import EnsembleRouter from "./pages/EnsembleRouter";
 import DynamicWeights from "./pages/DynamicWeights";
 import DayExplorer   from "./pages/DayExplorer";
 import Tomorrow      from "./pages/Tomorrow";
+import Mispricing    from "./pages/Mispricing";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/dynamic-weights" element={<DynamicWeights />} />
           <Route path="/day-explorer" element={<DayExplorer />} />
           <Route path="/tomorrow" element={<Tomorrow />}       />
+          <Route path="/mispricing" element={<Mispricing />}   />
         </Routes>
       </Layout>
     </BrowserRouter>
