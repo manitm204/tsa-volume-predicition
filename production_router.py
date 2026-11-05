@@ -89,10 +89,11 @@ in favor of yoy_delta — see ensemble_experiment/yoy_delta_oof.py):
 
 Holiday list (get_major_holiday_dates) covers, per year: New Year's Day,
 MLK Day, Presidents Day, Memorial Day, Juneteenth, Independence Day, Labor
-Day, Columbus Day, Veterans Day, Thanksgiving + Black Friday, Christmas Eve/
-Day, New Year's Eve. MLK/Presidents/Columbus/Veterans added after diagnosing
-2025-10-08→10-16 (Columbus Day week) as an omitted-holiday YoY growth spike
-that misled yoy_delta despite being classified NORMAL.
+Day, Columbus Day, Halloween, Veterans Day, Thanksgiving + Black Friday,
+Christmas Eve/Day, New Year's Eve. MLK/Presidents/Columbus/Veterans added after
+diagnosing 2025-10-08→10-16 (Columbus Day week) as an omitted-holiday YoY growth
+spike that misled yoy_delta despite being classified NORMAL. Halloween added
+after the 2026-10-31 (Saturday) week, when Fri-Sun ran well below NORMAL.
 """
 
 from dataclasses import dataclass
@@ -175,6 +176,7 @@ MAJOR_HOLIDAY_MONTHDAYS = [
     (1, 1),    # New Year's Day
     (6, 19),   # Juneteenth
     (7, 4),    # Independence Day
+    (10, 31),  # Halloween
     (11, 11),  # Veterans Day
     (12, 24),  # Christmas Eve
     (12, 25),  # Christmas Day
