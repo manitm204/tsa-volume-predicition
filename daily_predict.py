@@ -10,7 +10,7 @@ Pipeline:
   1. Tabular AutoGluon (autoregressive Monday chain for correct lag features)
   2. TS3 shadow model + yoy_delta (deterministic, no training) for the target date
   3. Per-regime ensemble weights  (ensemble_experiment/normal_weight_search.py)
-  4. Per-regime Platt σ_effective  (ensemble_experiment/platt_regime.py)
+  4. Per-regime raw OOF σ  (ensemble_experiment/platt_regime.py)
 
 Prerequisites:
     - Run autogluon_full.py first (trains model + generates OOF)
@@ -88,20 +88,21 @@ ENSEMBLE_WEIGHTS = {
 }
 
 # ── Per-regime σ for P(over/under) ───────────────────────────────────────
-# All regimes: Platt σ_effective = σ_raw / A  (ensemble_experiment/platt_regime.py)
-# STORM uses moderate_storm σ_eff (severe_storm n=2, not fitted separately).
-# Refit after dropping yoy_delta from the ensemble (platt_regime.py).
+# All regimes: raw OOF residual σ (ensemble_experiment/platt_regime.py). Not
+# σ/A: A is a logistic slope and these feed norm.cdf; see PLATT_RATIO in
+# autogluon_predict.py. STORM uses moderate_storm σ (severe_storm n=2, not
+# fitted separately).
 # NORMAL_YOY_AVAILABLE/UNAVAILABLE both reuse the old NORMAL sigma for now —
 # not yet re-tuned per bucket (same caveat as STORM_ECHO below).
 REGIME_SIGMA = {
-    "NORMAL_YOY_UNAVAILABLE": 37_058,
-    "NORMAL_YOY_AVAILABLE":   37_058,   # not yet re-tuned
-    "SHOULDER_PRE":  52_956,
-    "SHOULDER_POST": 45_824,
-    "PEAK_HOLIDAY":  70_017,
-    "STORM":         57_780,
+    "NORMAL_YOY_UNAVAILABLE": 67_302,
+    "NORMAL_YOY_AVAILABLE":   67_302,   # not yet re-tuned
+    "SHOULDER_PRE":  93_078,
+    "SHOULDER_POST": 82_353,
+    "PEAK_HOLIDAY":  123_198,
+    "STORM":         85_228,
     # Same weights as NORMAL_YOY_UNAVAILABLE for now (tagged for analysis, not yet re-tuned).
-    "STORM_ECHO":    37_058,
+    "STORM_ECHO":    67_302,
 }
 
 ITEM_ID = "tsa"
@@ -428,7 +429,7 @@ def main() -> None:
         else:
             print(f"  Weights:       storm α-blend")
     print(f"  pred_ensemble: {pred_ensemble:>12,.0f}")
-    print(f"  σ ({regime:<12}): {sigma:>12,.0f}  (Platt σ_eff)")
+    print(f"  σ ({regime:<12}): {sigma:>12,.0f}  (raw OOF σ)")
 
     # ── Summary ───────────────────────────────────────────────────────
     ci_low  = pred_ensemble - 1.645 * sigma

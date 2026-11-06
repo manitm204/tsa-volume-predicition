@@ -10,7 +10,7 @@ Prediction pipeline:
   1. Tabular AutoGluon (autoregressive Monday chain for correct lag features)
   2. TS3 shadow model + yoy_delta (deterministic) for each predicted day
   3. Per-regime ensemble weights  (ensemble_experiment/normal_weight_search.py)
-  4. Weekly σ from ensemble OOF + per-regime Platt ratio  (platt_regime.py)
+  4. Weekly σ from ensemble OOF
 
 Prerequisites:
     - Run autogluon_full.py first (trains model + generates OOF)
@@ -121,22 +121,18 @@ if _DYNAMIC_NORMAL_WEIGHTS_PATH.exists():
 
 PREDICTION_HISTORY_PATH = OUT_DIR / "prediction_history.csv"
 
-# Platt ratio = σ_eff / σ_raw per regime (ensemble_experiment/platt_regime.py)
-# All regimes now have Platt shrinkage. STORM uses moderate_storm σ_eff.
-# Re-fit 2026-09-22 against the corrected anchor_master/TS3 OOF (see
-# ENSEMBLE_WEIGHTS comment above) — kept in sync with daily_predict.py's
-# REGIME_SIGMA. NORMAL_YOY_AVAILABLE/UNAVAILABLE both reuse the old NORMAL
-# ratio for now — sigma hasn't been re-tuned per bucket yet (same caveat as
-# STORM_ECHO below).
+# Ratio applied to the weekly σ per regime. All 1.0: platt_regime.py's σ/A
+# divided a logistic slope into a σ that feeds norm.cdf. A calibrated Gaussian
+# already fits A≈1.7-1.8, so that shrank σ ~45% with no evidence (the probit
+# slope on the same OOF is ≈1). Kept in sync with daily_predict.py's REGIME_SIGMA.
 PLATT_RATIO = {
-    "NORMAL_YOY_UNAVAILABLE": 37_058 / 67_302,   # ≈ 0.551
-    "NORMAL_YOY_AVAILABLE":   37_058 / 67_302,   # ≈ 0.551 — not yet re-tuned
-    "SHOULDER_PRE":  52_956 / 93_078,   # ≈ 0.569
-    "SHOULDER_POST": 45_824 / 82_353,   # ≈ 0.556
-    "PEAK_HOLIDAY":  70_017 / 123_198,  # ≈ 0.568
-    "STORM":         57_780 / 85_228,   # ≈ 0.678
-    # Same as NORMAL_YOY_UNAVAILABLE for now (tagged for analysis, not yet re-tuned).
-    "STORM_ECHO":    37_058 / 67_302,   # ≈ 0.551
+    "NORMAL_YOY_UNAVAILABLE": 1.0,
+    "NORMAL_YOY_AVAILABLE":   1.0,
+    "SHOULDER_PRE":  1.0,
+    "SHOULDER_POST": 1.0,
+    "PEAK_HOLIDAY":  1.0,
+    "STORM":         1.0,
+    "STORM_ECHO":    1.0,
 }
 
 ITEM_ID = "tsa"

@@ -227,13 +227,14 @@ if _dyn is not None:
 
 # Re-fit 2026-09-22 against the corrected anchor_master/TS3 OOF (see
 # ENSEMBLE_WEIGHTS comment above). Kept in sync with daily_predict.py's
-# REGIME_SIGMA.
+# REGIME_SIGMA. sigma_eff equals sigma_raw: the old σ/A shrink mixed a logistic
+# slope into a Gaussian σ (see PLATT_RATIO in autogluon_predict.py).
 PLATT_SIGMA: dict[str, dict[str, int]] = {
-    "NORMAL":        {"sigma_raw": 67302,  "sigma_eff": 37058},
-    "SHOULDER_PRE":  {"sigma_raw": 93078,  "sigma_eff": 52956},
-    "SHOULDER_POST": {"sigma_raw": 82353,  "sigma_eff": 45824},
-    "PEAK_HOLIDAY":  {"sigma_raw": 123198, "sigma_eff": 70017},
-    "STORM":         {"sigma_raw": 85228,  "sigma_eff": 57780},
+    "NORMAL":        {"sigma_raw": 67302,  "sigma_eff": 67302},
+    "SHOULDER_PRE":  {"sigma_raw": 93078,  "sigma_eff": 93078},
+    "SHOULDER_POST": {"sigma_raw": 82353,  "sigma_eff": 82353},
+    "PEAK_HOLIDAY":  {"sigma_raw": 123198, "sigma_eff": 123198},
+    "STORM":         {"sigma_raw": 85228,  "sigma_eff": 85228},
 }
 
 
@@ -255,6 +256,11 @@ def _kalshi_implied_avg(snap: pd.DataFrame) -> float | None:
     if snap.empty or "strike_millions" not in snap.columns:
         return None
     rows = snap[snap["strike_millions"].between(2.0, 3.0)].sort_values("strike_millions")
+    # market_prob is a placeholder 0.5 on unquoted strikes and just the lone quote
+    # on one-sided ones. A lone bid only bounds P from below and a lone ask from
+    # above, so keep only strikes whose quotes say which side of 0.5 they're on.
+    bid, ask = rows["yes_bid_cents"], rows["yes_ask_cents"]
+    rows = rows[(bid.notna() & ask.notna()) | (ask.isna() & (bid >= 50)) | (bid.isna() & (ask < 50))]
     if rows.empty:
         return None
     strikes = rows["strike_millions"].tolist()
