@@ -256,6 +256,11 @@ def _kalshi_implied_avg(snap: pd.DataFrame) -> float | None:
     if snap.empty or "strike_millions" not in snap.columns:
         return None
     rows = snap[snap["strike_millions"].between(2.0, 3.0)].sort_values("strike_millions")
+    # market_prob is a placeholder 0.5 on unquoted strikes and just the lone quote
+    # on one-sided ones. A lone bid only bounds P from below and a lone ask from
+    # above, so keep only strikes whose quotes say which side of 0.5 they're on.
+    bid, ask = rows["yes_bid_cents"], rows["yes_ask_cents"]
+    rows = rows[(bid.notna() & ask.notna()) | (ask.isna() & (bid >= 50)) | (bid.isna() & (ask < 50))]
     if rows.empty:
         return None
     strikes = rows["strike_millions"].tolist()
