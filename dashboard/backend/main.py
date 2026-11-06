@@ -227,13 +227,14 @@ if _dyn is not None:
 
 # Re-fit 2026-09-22 against the corrected anchor_master/TS3 OOF (see
 # ENSEMBLE_WEIGHTS comment above). Kept in sync with daily_predict.py's
-# REGIME_SIGMA.
+# REGIME_SIGMA. sigma_eff equals sigma_raw: the old σ/A shrink mixed a logistic
+# slope into a Gaussian σ (see PLATT_RATIO in autogluon_predict.py).
 PLATT_SIGMA: dict[str, dict[str, int]] = {
-    "NORMAL":        {"sigma_raw": 67302,  "sigma_eff": 37058},
-    "SHOULDER_PRE":  {"sigma_raw": 93078,  "sigma_eff": 52956},
-    "SHOULDER_POST": {"sigma_raw": 82353,  "sigma_eff": 45824},
-    "PEAK_HOLIDAY":  {"sigma_raw": 123198, "sigma_eff": 70017},
-    "STORM":         {"sigma_raw": 85228,  "sigma_eff": 57780},
+    "NORMAL":        {"sigma_raw": 67302,  "sigma_eff": 67302},
+    "SHOULDER_PRE":  {"sigma_raw": 93078,  "sigma_eff": 93078},
+    "SHOULDER_POST": {"sigma_raw": 82353,  "sigma_eff": 82353},
+    "PEAK_HOLIDAY":  {"sigma_raw": 123198, "sigma_eff": 123198},
+    "STORM":         {"sigma_raw": 85228,  "sigma_eff": 85228},
 }
 
 
