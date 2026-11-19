@@ -244,7 +244,7 @@ def _today_capital_deployed(positions: list[dict]) -> float:
 
 def _is_daily_for(today: date, ticker: str) -> bool:
     yy = today.strftime("%y%b%d").upper()
-    return ticker.startswith(f"KXTRUFTSA-{yy}-")
+    return ticker.startswith(f"KXTSAD-{yy}-")
 
 
 # ── Brief assembly ───────────────────────────────────────────────────────────

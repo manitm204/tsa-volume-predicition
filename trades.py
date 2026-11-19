@@ -16,7 +16,7 @@ Usage:
     python trades.py all                    # refresh + positions + history + bins
 
 Notes:
-    - Daily ticker  KXTRUFTSA-26JUN12-T2120000 -> threshold 2.12M, date 2026-06-12
+    - Daily ticker  KXTSAD-26NOV19-T2120000 (formerly KXTRUFTSA) -> threshold 2.12M, date 2026-06-12
     - Weekly ticker KXTSAW-26JUN14-A1.80       -> threshold 1.80M, week-end 2026-06-14
     - Model prob: daily markets only (looked up from daily_forecast.csv).
       YES side = p_over_<strike>M, NO side = 1 - p_over_<strike>M.
@@ -92,7 +92,7 @@ def parse_ticker(ticker: str) -> tuple[str | None, float | None, str | None]:
     if len(parts) < 3:
         return None, None, None
 
-    if parts[0] == "KXTRUFTSA":
+    if parts[0] in ("KXTSAD", "KXTRUFTSA"):
         market_type = "daily"
     elif parts[0] == "KXTSAW":
         market_type = "weekly"
@@ -180,7 +180,7 @@ def refresh() -> None:
     tickers_seen: set[str] = set()
     for f in fills:
         ticker = f.get("ticker") or f.get("market_ticker") or ""
-        if "KXTSAW" not in ticker and "KXTRUFTSA" not in ticker:
+        if not ticker.startswith(("KXTSAW", "KXTSAD", "KXTRUFTSA")):
             continue
         trade_id = f.get("trade_id") or f.get("fill_id")
         if not trade_id:
@@ -594,7 +594,7 @@ def main() -> None:
     sub.add_parser("refresh", help="pull new fills + settled positions from Kalshi API")
 
     def _add_filters(sp):
-        sp.add_argument("--daily",  action="store_true", help="only daily markets (KXTRUFTSA)")
+        sp.add_argument("--daily",  action="store_true", help="only daily markets (KXTSAD)")
         sp.add_argument("--weekly", action="store_true", help="only weekly markets (KXTSAW)")
 
     sp = sub.add_parser("positions", help="open positions w/ avg price + edge")

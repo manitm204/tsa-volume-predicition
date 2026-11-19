@@ -721,7 +721,7 @@ def today_brief(today: date | None = None) -> dict:
 
     # Latest market snapshot per daily ticker for today.
     today_yy = today.strftime("%y%b%d").upper()        # e.g. '26JUN14'
-    ticker_like = f"KXTRUFTSA-{today_yy}-%"
+    ticker_like = f"KXTSAD-{today_yy}-%"
     rows = db.query(
         """
         WITH ranked AS (

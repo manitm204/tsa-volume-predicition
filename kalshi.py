@@ -41,7 +41,7 @@ _DEMO_BASE = "https://demo-api.kalshi.co/trade-api/v2"
 _API_PATH_PREFIX = "/trade-api/v2"
 
 _DEFAULT_SERIES    = "KXTSAW"
-_DAILY_SERIES      = "KXTRUFTSA"
+_DAILY_SERIES      = "KXTSAD"  # renamed from KXTRUFTSA in Nov 2026
 
 # Anchor all paths to the kalshi.py file location so behaviour is identical
 # whether kalshi.py is run as a CLI from the repo root or imported by the
