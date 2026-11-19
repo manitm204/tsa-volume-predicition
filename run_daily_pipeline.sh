@@ -7,8 +7,18 @@ set -a
 source .env
 set +a
 
-# Optional first arg overrides the weekly-market bankroll (default 150).
-BANKROLL="${1:-150}"
+# Usage: run_daily_pipeline.sh [WEEKLY_BANKROLL [DAILY_BANKROLL]]
+#   no args          -> kalshi.py dry-run (weekly 150, daily 100)
+#   WEEKLY           -> live weekly trading only
+#   WEEKLY DAILY     -> live weekly + daily trading
+if [ $# -eq 0 ]; then
+    BANKROLL=150
+    KALSHI_ARGS=(--dry-run --bankroll "$BANKROLL" --daily-bankroll 100)
+else
+    BANKROLL="$1"
+    KALSHI_ARGS=(--bankroll "$BANKROLL")
+    [ -n "$2" ] && KALSHI_ARGS+=(--daily-bankroll "$2")
+fi
 export KALSHI_BANKROLL="$BANKROLL"
 
 # Cron's PATH excludes pyenv shims, so bare `python3` resolves to
@@ -21,8 +31,10 @@ PY="${PY:-/home/manit/.pyenv/shims/python3}"
 export PIPELINE_RUN_TS=$(date -u +%Y%m%d_%H%M%S)
 echo "[pipeline] Run ID: $PIPELINE_RUN_TS  PY=$PY"
 
-"$PY" get_new_tsa.py
-"$PY" get_weather.py
+# tsa.gov can 403 automated clients; keep going on the last data and let
+# send_update.py warn. Backfill with: get_new_tsa.py --html <saved page>
+"$PY" get_new_tsa.py || export TSA_FETCH_FAILED=1
+# "$PY" get_weather.py
 "$PY" build_features.py
 
 # Retrain Prophet daily / TS3 weekly (skips if not stale).
@@ -32,5 +44,6 @@ echo "[pipeline] Run ID: $PIPELINE_RUN_TS  PY=$PY"
 
 "$PY" autogluon_predict.py
 
-#"$PY" kalshi.py --bankroll "$BANKROLL" --daily-bankroll 100
+echo "[pipeline] kalshi.py ${KALSHI_ARGS[*]}"
+"$PY" kalshi.py "${KALSHI_ARGS[@]}"
 "$PY" send_update.py
