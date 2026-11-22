@@ -5,7 +5,7 @@ import TopBar from "./TopBar";
 
 const titles: Record<string, string> = {
   "/":         "Command Center",
-  "/tomorrow": "Tomorrow",
+  "/today":    "Today",
   "/forecast": "Model Performance",
   "/week":     "This Week",
   "/shadow":   "Ensemble Router",

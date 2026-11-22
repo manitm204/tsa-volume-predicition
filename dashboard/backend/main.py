@@ -535,8 +535,13 @@ def tomorrow_forecast():
     if predicted.empty:
         return {"has_data": False, "reason": "All days in current week are actual — no predicted days"}
 
-    # Take the first predicted day (tomorrow or next future day)
-    r = predicted.iloc[0]
+    # TSA reports Fri–Sun late (on Monday), so the first predicted day can be
+    # in the past. Target the first predicted day on/after today (ET), which
+    # is the day whose daily Kalshi market is live.
+    from zoneinfo import ZoneInfo
+    today_et = pd.Timestamp(datetime.now(ZoneInfo("America/New_York")).date())
+    upcoming = predicted[predicted["Date"] >= today_et]
+    r = upcoming.iloc[0] if not upcoming.empty else predicted.iloc[0]
     target_date = str(r["Date"].date())
     regime      = str(r["regime"]) if pd.notna(r.get("regime")) else "NORMAL"
 

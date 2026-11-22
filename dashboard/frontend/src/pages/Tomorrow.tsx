@@ -85,7 +85,7 @@ export default function Tomorrow() {
   if (isLoading) {
     return (
       <GlassSection title="Loading…">
-        <p className="text-slate-500 text-[13px]">Fetching tomorrow's forecast…</p>
+        <p className="text-slate-500 text-[13px]">Fetching today's forecast…</p>
       </GlassSection>
     );
   }
@@ -93,7 +93,7 @@ export default function Tomorrow() {
   if (!data?.has_data) {
     return (
       <>
-        <PageHeader title="Tomorrow" description="Next day's per-model forecast" kpis={[]} />
+        <PageHeader title="Today" description="Today's per-model forecast" kpis={[]} />
         <GlassSection title="No data">
           <p className="text-slate-500 text-[13px]">{data?.reason ?? "No predicted days found."}</p>
         </GlassSection>
@@ -158,7 +158,7 @@ export default function Tomorrow() {
   return (
     <div className="space-y-5 animate-fade-in">
       <PageHeader
-        title="Tomorrow"
+        title="Today"
         description={`Per-model breakdown for ${data.target_date} · ${data.day_name}`}
         kpis={kpis}
       />

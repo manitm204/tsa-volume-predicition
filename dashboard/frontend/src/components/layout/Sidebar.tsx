@@ -15,7 +15,7 @@ interface Link {
 
 const links: Link[] = [
   { to: "/",         label: "Command",   Icon: Crosshair,     hint: "Today's signal"          },
-  { to: "/tomorrow", label: "Tomorrow",  Icon: TrendingUp,    hint: "Next day forecast"       },
+  { to: "/today",    label: "Today",     Icon: TrendingUp,    hint: "Today's forecast"        },
   { to: "/day-explorer", label: "Day Explorer", Icon: CalendarDays, hint: "Cycle per-model breakdown"},
   { to: "/week",     label: "This Week", Icon: CalendarRange, hint: "Forecast ladder"         },
   { to: "/forecast", label: "Model",     Icon: LineChart,     hint: "Accuracy / scorecard"    },
